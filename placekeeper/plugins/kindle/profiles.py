@@ -8,9 +8,12 @@ from placekeeper.mapping.text import Mapper
 from placekeeper.storage import digest
 
 
-def load_profile(path):
+def load_profile(path, *, expected_sha256=None):
     path = Path(path).resolve()
-    profile = json.loads(path.read_text())
+    raw = path.read_bytes()
+    if expected_sha256 is not None and hashlib.sha256(raw).hexdigest() != expected_sha256:
+        raise ValueError('Map fingerprint changed')
+    profile = json.loads(raw)
     if not re.fullmatch(r'[A-Z0-9]{10,64}', profile['document']):
         raise ValueError('Invalid Kindle document identifier')
     if not re.fullmatch(r'[a-f0-9]{32}', profile['crosspoint_document']):
@@ -36,15 +39,22 @@ def load_profile(path):
         return profile, StoreMapper(files['epub'], json.loads(files['chapters'].read_text())), digest(profile)
     mapper = Mapper(**files)
     if profile.get('schema_version') == 2:
-        from placekeeper.plugins.kindle.onboarding import evaluate_pair, validate_map
         if (profile.get('status') != 'ready_for_dry_run'
                 or profile.get('automatic_progress_writes_enabled') is not False
                 or profile.get('bridge',{}).get('model') != 'legacy_sidecar_location_bucket_150'
                 or hashlib.md5(profile['x4_filename'].encode()).hexdigest() != profile['crosspoint_document']):
             raise ValueError('Automatic profile has an unsupported identity or sync policy')
-        if not evaluate_pair(files['epub'],files['content'])['accepted']:
+        if expected_sha256 is None:
+            from placekeeper.plugins.kindle.onboarding import evaluate_indexes, validate_map
+            validation = {'text_match': evaluate_indexes(mapper.epub, mapper.kfx),
+                          'round_trip': validate_map(mapper)}
+        else:
+            # The discovery registry pins the profile and its saved validation.
+            # File fingerprints above still protect the underlying inputs.
+            validation = profile['validation']
+        if validation['text_match'].get('accepted') is not True:
             raise ValueError('Automatic profile text alignment failed')
-        if not validate_map(mapper)['accepted']:
+        if validation['round_trip'].get('accepted') is not True:
             raise ValueError('Automatic profile coordinate checks failed')
         return profile, mapper, digest(profile)
     highlight = profile['highlight_check']

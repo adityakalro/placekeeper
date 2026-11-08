@@ -133,6 +133,16 @@ class OnboardingTests(unittest.TestCase):
         self.assertEqual(self.downloads,1)
         self.assertEqual(self.source.download_count,1)
 
+    def test_registry_load_reuses_validation_but_still_checks_file_hashes(self):
+        self.engine().run_once()
+        entry = json.loads((self.root/'ready-profiles.json').read_text())['profiles'][0]
+        with patch('placekeeper.plugins.kindle.onboarding.validate_map') as validate:
+            profile, _, _ = load_profile(entry['path'], expected_sha256=entry['sha256'])
+        validate.assert_not_called()
+        Path(profile['files']['content']['path']).write_text('{}')
+        with self.assertRaisesRegex(ValueError, 'content fingerprint differs'):
+            load_profile(entry['path'], expected_sha256=entry['sha256'])
+
     def test_epub_arriving_later_is_automatically_retried(self):
         items=self.source.items;self.source.items=[]
         first=self.engine().run_once()

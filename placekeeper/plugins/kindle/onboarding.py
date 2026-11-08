@@ -73,8 +73,7 @@ def text_evidence(source, target, sample_count=120):
             'length_ratio':ratio,'adequate':coverage>=0.98 and ratio>=0.98}
 
 
-def evaluate_pair(epub, content):
-    e=epub_index(epub);k=kfx_index(content)
+def evaluate_indexes(e, k):
     forward=text_evidence(e,k);reverse=text_evidence(k,e)
     identical=e.text==k.text
     return {'epub_to_kfx':forward,'kfx_to_epub':reverse,
@@ -146,27 +145,29 @@ class Onboarder:
             manifest=json.loads((directory/(doc+'-manifest.json')).read_text())
             download_kfx(doc,manifest,directory)
         content,locations=self.extract(doc,directory)
+        kindle_text = kfx_index(content)
         accepted=[];checks=[]
         for candidate in possible:
             epub=self.root/'epubs'/(candidate['id']+'.epub')
             if not epub.exists():
                 epub=self.source.download(candidate,self.root/'epubs')
-            evidence=evaluate_pair(epub,content)
+            epub_text = epub_index(epub)
+            evidence=evaluate_indexes(epub_text, kindle_text)
             checks.append({'readest_id':candidate['id'],'evidence':evidence})
             if evidence['accepted']:
-                accepted.append((candidate,epub,evidence))
+                accepted.append((candidate,epub,evidence,epub_text))
         private_json(directory/'match-evidence.json',checks)
         if len(accepted)!=1:
             return {'status':'needs_review' if accepted else 'edition_mismatch',
                     'candidate_count':len(possible),'accepted_count':len(accepted),
                     'catalog_signature':catalog_signature}
-        candidate,epub,evidence=accepted[0]
+        candidate,epub,evidence,epub_text=accepted[0]
         filename=candidate['title']+'.epub'
         if any(c in filename for c in '<>:"/\\|?*') or any(ord(c)<32 for c in filename) or filename in ('.epub','..epub'):
             return {'status':'needs_review','reason':'unsupported_x4_filename','catalog_signature':catalog_signature}
         if sum(b['title']==candidate['title'] for b in books)>1:
             return {'status':'needs_review','reason':'x4_filename_collision','catalog_signature':catalog_signature}
-        mapper=Mapper(epub,content,locations)
+        mapper=Mapper(epub,content,locations,epub_text=epub_text,kfx_text=kindle_text)
         validation=validate_map(mapper)
         if not validation['accepted']:
             return {'status':'needs_review','reason':'round_trip_check_failed','catalog_signature':catalog_signature}

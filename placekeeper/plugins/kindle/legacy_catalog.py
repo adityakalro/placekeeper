@@ -1,7 +1,6 @@
 """Compatibility bridge for existing Kindle/Readest book maps and receipts."""
 from collections import Counter
 from datetime import datetime
-from hashlib import sha256
 import json
 from pathlib import Path
 import subprocess
@@ -64,9 +63,7 @@ def books(root):
     for item in json.loads(registry.read_text())['profiles']:
         path = Path(item['path'])
         try:
-            if sha256(path.read_bytes()).hexdigest() != item['sha256']:
-                raise ValueError('Map fingerprint changed')
-            profile, mapper, _ = load_profile(path)
+            profile, mapper, _ = load_profile(path, expected_sha256=item['sha256'])
             document = profile['document']
             epub = Path(profile['files']['epub']['path'])
             if not epub.is_absolute():

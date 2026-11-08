@@ -232,9 +232,9 @@ firmware that has not built a pagination cache for the destination chapter.
 
 
 class Mapper:
-    def __init__(self, epub, content, locations):
-        self.epub = epub_index(epub)
-        self.kfx = kfx_index(content)
+    def __init__(self, epub, content, locations, *, epub_text=None, kfx_text=None):
+        self.epub = epub_index(epub) if epub_text is None else epub_text
+        self.kfx = kfx_index(content) if kfx_text is None else kfx_text
         self.locations = json.loads(Path(locations).read_text())
         self.starts = [r['position'] for r in self.locations]
         if self.starts != sorted(self.starts):
