@@ -13,10 +13,10 @@ from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
-import posixpath
 import unicodedata
-import xml.etree.ElementTree as ET
 from zipfile import ZipFile
+
+from placekeeper.mapping.epub import body, package, text_runs
 
 
 def normalized(text):
@@ -129,36 +129,11 @@ class Coordinates(Sequence):
 def epub_index(path):
     runs = []
     with ZipFile(path) as z:
-        container = ET.fromstring(z.read('META-INF/container.xml'))
-        opf_path = next(e.attrib['full-path'] for e in container.iter()
-                        if e.tag.rsplit('}', 1)[-1] == 'rootfile')
-        opf = ET.fromstring(z.read(opf_path))
-        manifest = {e.attrib['id']: e.attrib['href'] for e in opf.iter()
-                    if e.tag.rsplit('}', 1)[-1] == 'item'}
-        spine = [e.attrib['idref'] for e in opf.iter()
-                 if e.tag.rsplit('}', 1)[-1] == 'itemref']
-        for fragment, idref in enumerate(spine, 1):
-            href = posixpath.normpath(posixpath.join(posixpath.dirname(opf_path), manifest[idref]))
-            root = ET.fromstring(z.read(href))
-            body = next(e for e in root.iter() if e.tag.rsplit('}', 1)[-1] == 'body')
-
-            def walk(element, xpath):
-                node = 0
-                if element.text:
-                    node += 1
-                    base = f'{xpath}/text()[{node}]'
-                    runs.append((element.text, lambda o, b=base: f'{b}.{o}'))
-                counts = {}
-                for child in element:
-                    tag = child.tag.rsplit('}', 1)[-1]
-                    counts[tag] = counts.get(tag, 0)+1
-                    if tag not in ('script', 'style'):
-                        walk(child, f'{xpath}/{tag}[{counts[tag]}]')
-                    if child.tail:
-                        node += 1
-                        base = f'{xpath}/text()[{node}]'
-                        runs.append((child.tail, lambda o, b=base: f'{b}.{o}'))
-            walk(body, f'/body/DocFragment[{fragment}]/body')
+        _, _, _, files = package(z)
+        for fragment, filename in enumerate(files, 1):
+            prefix = f'/body/DocFragment[{fragment}]/body'
+            for xpath, text in text_runs(body(z, filename), prefix):
+                runs.append((text, lambda offset, path=xpath: f'{path}.{offset}'))
     return TextIndex.make(runs)
 
 
@@ -184,39 +159,14 @@ firmware that has not built a pagination cache for the destination chapter.
     fragment, ancestry, node, offset = match.groups()
     spine_index, node, offset = int(fragment)-1, int(node), int(offset)
     with ZipFile(path) as z:
-        container = ET.fromstring(z.read('META-INF/container.xml'))
-        opf_path = next(e.attrib['full-path'] for e in container.iter()
-                        if e.tag.rsplit('}', 1)[-1] == 'rootfile')
-        opf = ET.fromstring(z.read(opf_path))
-        manifest = {e.attrib['id']: e.attrib['href'] for e in opf.iter()
-                    if e.tag.rsplit('}', 1)[-1] == 'item'}
-        spine = [posixpath.normpath(posixpath.join(posixpath.dirname(opf_path), manifest[e.attrib['idref']]))
-                 for e in opf.iter() if e.tag.rsplit('}', 1)[-1] == 'itemref']
+        _, _, _, spine = package(z)
         if not 0 <= spine_index < len(spine):
             raise ValueError('Spine index is absent')
         sizes = [z.getinfo(href).file_size for href in spine]
-        root = ET.fromstring(z.read(spine[spine_index]))
-        body = next(e for e in root.iter() if e.tag.rsplit('}', 1)[-1] == 'body')
-    runs = []
-
-    def walk(element, xpath):
-        n = 0
-        if element.text:
-            n += 1
-            runs.append((f'{xpath}/text()[{n}]', element.text))
-        counts = {}
-        for child in element:
-            tag = child.tag.rsplit('}', 1)[-1]
-            counts[tag] = counts.get(tag, 0)+1
-            if tag not in ('style', 'script'):
-                walk(child, f'{xpath}/{tag}[{counts[tag]}]')
-            if child.tail:
-                n += 1
-                runs.append((f'{xpath}/text()[{n}]', child.tail))
-    walk(body, '/body')
+        chapter = body(z, spine[spine_index])
     target = f'/body{ancestry}/text()[{node}]'
     before, found = 0, None
-    for xpath, text in runs:
+    for xpath, text in text_runs(chapter, '/body'):
         if xpath == target:
             if offset > len(text):
                 raise ValueError('Text offset exceeds node length')

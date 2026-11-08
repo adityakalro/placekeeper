@@ -1,11 +1,13 @@
 """Approximate ebook/audio handoffs using matched chapter boundaries."""
 import bisect
-import posixpath
+from collections import defaultdict
 import re
 import unicodedata
 from urllib.parse import unquote
 from xml.etree import ElementTree as ET
 from zipfile import ZipFile
+
+from placekeeper.mapping.epub import anchor_paths, body, package, resolve
 
 
 def chapter_key(label):
@@ -30,16 +32,12 @@ def chapter_key(label):
 
 def epub_entries(epub, coordinates):
     with ZipFile(epub) as book:
-        opf_path = ET.fromstring(book.read('META-INF/container.xml')).find('.//{*}rootfile').get('full-path')
-        opf = ET.fromstring(book.read(opf_path))
-        manifest = {item.get('id'): item for item in opf.findall('.//{*}manifest/{*}item')}
-        spine = opf.find('{*}spine')
-        def resolve(base, href):
-            return posixpath.normpath(posixpath.join(posixpath.dirname(base), unquote(href)))
-        files = [resolve(opf_path, manifest[item.get('idref')].get('href'))
-                 for item in spine.findall('{*}itemref')]
+        opf_path, manifest, spine, files = package(book)
+        fragments = {}
+        for fragment, filename in enumerate(files, 1):
+            fragments.setdefault(filename, fragment)
         nav = next((item for item in manifest.values() if 'nav' in item.get('properties', '').split()), None)
-        toc_item = nav or manifest.get(spine.get('toc'))
+        toc_item = nav if nav is not None else manifest.get(spine.get('toc'))
         if toc_item is None:
             raise ValueError('EPUB has no supported table of contents')
         toc_path = resolve(opf_path, toc_item.get('href'))
@@ -51,32 +49,31 @@ def epub_entries(epub, coordinates):
         else:
             links = [(n.find('{*}navLabel/{*}text').text.strip(), n.find('{*}content').get('src'))
                      for n in toc.findall('.//{*}navPoint')]
-        prefix_indices = list(zip(coordinates.prefixes, coordinates.starts))
+        starts_by_path = {}
+        for node, index in zip(coordinates.prefixes, coordinates.starts):
+            while node and node not in starts_by_path:
+                starts_by_path[node] = index
+                node = node.rpartition('/')[0]
+        anchors_by_file = {}
         entries = []
         for label, href in links:
             path, _, anchor = href.partition('#')
             target_file = resolve(toc_path, path)
-            if target_file not in files:
+            if target_file not in fragments:
                 continue
-            fragment = files.index(target_file) + 1
+            fragment = fragments[target_file]
             prefix = f'/body/DocFragment[{fragment}]/body'
             if anchor:
-                body = ET.fromstring(book.read(target_file)).find('.//{*}body')
-                found = []
-                def walk(element, xpath):
-                    if element.get('id') == unquote(anchor):
-                        found.append(xpath)
-                    counts = {}
-                    for child in element:
-                        tag = child.tag.rsplit('}', 1)[-1]
-                        counts[tag] = counts.get(tag, 0) + 1
-                        walk(child, f'{xpath}/{tag}[{counts[tag]}]')
-                walk(body, prefix)
+                if target_file not in anchors_by_file:
+                    paths = defaultdict(list)
+                    for anchor_id, xpath in anchor_paths(body(book, target_file), prefix):
+                        paths[anchor_id].append(xpath)
+                    anchors_by_file[target_file] = paths
+                found = anchors_by_file[target_file].get(unquote(anchor), ())
                 if len(found) != 1:
                     raise ValueError('EPUB chapter anchor is ambiguous')
                 prefix = found[0]
-            start = next((index for node, index in prefix_indices
-                          if node.startswith(prefix + '/') or node == prefix), None)
+            start = starts_by_path.get(prefix)
             if start is None:
                 if chapter_key(label).startswith('chapter '):
                     raise ValueError('EPUB chapter has no readable text')
