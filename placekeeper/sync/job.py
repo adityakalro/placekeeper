@@ -1,5 +1,7 @@
 """Independent catalog discovery and progress jobs for the plugin registry."""
 from collections import Counter
+from contextlib import ExitStack
+from dataclasses import replace
 
 from placekeeper.errors import ReadFailure
 from placekeeper.sync.engine import sync_book
@@ -22,6 +24,16 @@ def refresh_libraries(root, plugins):
 
 
 def run_books(root, plugins, notify, *, dry_run=False):
+    with ExitStack() as stack:
+        readers = {
+            key: replace(plugin, reader=stack.enter_context(plugin.reader_session(root)))
+            if plugin.reader_session is not None else plugin
+            for key, plugin in plugins.items()
+        }
+        return run_catalogs(root, plugins, readers, notify, dry_run)
+
+
+def run_catalogs(root, plugins, readers, notify, dry_run):
     results = []
     seen = set()
     for key, plugin in plugins.items():
@@ -37,7 +49,7 @@ def run_books(root, plugins, notify, *, dry_run=False):
                 seen.add(book.key)
                 notify('Syncing ' + book.title + '…')
                 try:
-                    result = sync_book(root, book, plugins, dry_run=dry_run)
+                    result = sync_book(root, book, readers, dry_run=dry_run)
                 except Exception as error:
                     message = str(error) if isinstance(error, ReadFailure) else 'Could not open the book or a connected reader.'
                     result = error_result(book.title, message)

@@ -14,6 +14,7 @@ import httpx
 from placekeeper import plugins
 from placekeeper.errors import MissingProgress, ReadFailure
 from placekeeper.plugins.contracts import Book, Observation, Plugin
+from placekeeper.plugins.libby.client import Libby
 from placekeeper.plugins.libby.reader import LibbyReader, open_reader as open_libby
 from placekeeper.plugins.registry import installed
 from placekeeper.sync.engine import execute
@@ -89,7 +90,7 @@ def with_reader(plugin, reader):
     @contextmanager
     def open_reader(root, book):
         yield reader
-    return replace(plugin, reader=open_reader)
+    return replace(plugin, reader=open_reader, reader_session=None)
 
 
 class PluginEngineTests(unittest.TestCase):
@@ -218,6 +219,20 @@ class PluginEngineTests(unittest.TestCase):
         self.assertFalse(reader.equivalent(0, 60_001))
         self.assertIsNone(reader.target(60_000, current))
         self.assertEqual(reader.target(60_001, current), 60_001)
+
+    def test_one_libby_shelf_request_per_job(self):
+        registry = installed()
+        libby = Libby(self.root/'libby-device.json')
+        catalog = Plugin('fixture', 'Fixture', (), books=lambda root: [
+            Book(str(i), f'Title {i}', 'map', epub=root/'fixture.epub') for i in range(3)])
+        with patch('placekeeper.plugins.libby.reader.Libby', return_value=libby), \
+                patch.object(libby, 'get', return_value={'loans': []}) as get:
+            results = run_books(self.root, {'fixture': catalog, 'libby': registry['libby']},
+                                lambda _: None, dry_run=True)
+        self.assertEqual(len(results), 3)
+        self.assertTrue(all(result['status'] == 'skipped' for result in results))
+        get.assert_called_once_with('/chip/sync')
+        self.assertTrue(libby.client.is_closed)
 
     def test_libby_session_closes_a_player_that_is_already_open(self):
         player = httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(200)))

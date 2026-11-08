@@ -3,7 +3,7 @@ import time
 
 from placekeeper.plugins.contracts import Plugin
 from .client import Libby
-from .reader import open_reader
+from .reader import open_reader, reader_session
 
 FILE = 'libby-device.json'
 
@@ -25,4 +25,4 @@ PLUGIN = Plugin('libby', 'Libby', (FILE,),
     'Enter the code in Libby under Menu → Copy To Another Device.',
     actions=({'id': 'start', 'label': 'Get Libby code'},
              {'id': 'finish', 'label': 'Check connection', 'after': 'start'}),
-    setup=setup, reader=open_reader)
+    setup=setup, reader=open_reader, reader_session=reader_session)

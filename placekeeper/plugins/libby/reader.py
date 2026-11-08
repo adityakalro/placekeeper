@@ -1,5 +1,5 @@
 """Libby progress and chapter alignment against a verified edition."""
-from contextlib import closing, contextmanager
+from contextlib import ExitStack, closing, contextmanager
 
 from placekeeper.errors import MissingProgress, ReadFailure
 from placekeeper.mapping.chapters import ChapterMap
@@ -48,25 +48,37 @@ class LibbyReader:
 
 
 @contextmanager
+def reader_session(root):
+    with ExitStack() as stack:
+        libby = None
+
+        @contextmanager
+        def open_book(_root, book):
+            nonlocal libby
+            if book.epub is None:
+                yield None
+                return
+            if libby is None:
+                libby = stack.enter_context(closing(Libby(root/'libby-device.json')))
+            loan = book.bindings.get('libby') or libby.match(book.title, book.epub)
+            if loan is None:
+                yield None
+                return
+            try:
+                marker = libby.position(loan)
+            except MissingProgress:
+                yield None
+                return
+            player, url, timing = libby.open_player(loan)
+            with closing(player):
+                coordinates = book.mapper.epub.coordinates if book.mapper else epub_index(book.epub).coordinates
+                chapters = ChapterMap(book.epub, coordinates, timing)
+                yield LibbyReader(libby, loan, player, url, timing, chapters, coordinates, marker)
+
+        yield open_book
+
+
+@contextmanager
 def open_reader(root, book):
-    if book.epub is None:
-        yield None
-        return
-    libby = Libby(root/'libby-device.json')
-    try:
-        loan = book.bindings.get('libby') or libby.match(book.title, book.epub)
-        if loan is None:
-            yield None
-            return
-        try:
-            marker = libby.position(loan)
-        except MissingProgress:
-            yield None
-            return
-        player, url, timing = libby.open_player(loan)
-        with closing(player):
-            coordinates = book.mapper.epub.coordinates if book.mapper else epub_index(book.epub).coordinates
-            chapters = ChapterMap(book.epub, coordinates, timing)
-            yield LibbyReader(libby, loan, player, url, timing, chapters, coordinates, marker)
-    finally:
-        libby.close()
+    with reader_session(root) as open_book, open_book(root, book) as reader:
+        yield reader

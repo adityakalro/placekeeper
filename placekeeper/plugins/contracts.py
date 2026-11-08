@@ -50,6 +50,7 @@ class Plugin:
     discover: Callable | None = None  # (root, connected plugin IDs) -> status counts and optional matches list
     disconnect: Callable | None = None
     catalog_requires: tuple[str, ...] = ()
+    reader_session: Callable | None = None  # (root) -> context manager yielding a job-scoped reader factory
 
     def catalog_ready(self, connected):
         return self.books is not None and all(key in connected for key in self.catalog_requires)
