@@ -1,5 +1,6 @@
 """CrossPoint progress in the verified EPUB's text coordinates."""
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
+from functools import cache
 import json
 
 import httpx
@@ -46,13 +47,29 @@ class CrossPointReader:
 
 
 @contextmanager
+def reader_session(root):
+    with ExitStack() as stack:
+        @cache
+        def connect():
+            credentials = json.loads((root/'crosspoint-auth.json').read_text())
+            headers = {'x-auth-user': credentials['username'], 'x-auth-key': credentials['auth_key']}
+            client = stack.enter_context(httpx.Client(timeout=20, follow_redirects=False))
+            return client, headers
+
+        @contextmanager
+        def reader(root, book):
+            binding = book.bindings.get('crosspoint')
+            if not binding or book.epub is None:
+                yield None
+                return
+            coordinates = book.mapper.epub.coordinates if book.mapper else epub_index(book.epub).coordinates
+            client, headers = connect()
+            yield CrossPointReader(client, headers, binding, book.epub, coordinates)
+
+        yield reader
+
+
+@contextmanager
 def open_reader(root, book):
-    binding = book.bindings.get('crosspoint')
-    if not binding or book.epub is None:
-        yield None
-        return
-    credentials = json.loads((root/'crosspoint-auth.json').read_text())
-    headers = {'x-auth-user': credentials['username'], 'x-auth-key': credentials['auth_key']}
-    coordinates = book.mapper.epub.coordinates if book.mapper else epub_index(book.epub).coordinates
-    with httpx.Client(timeout=20, follow_redirects=False) as client:
-        yield CrossPointReader(client, headers, binding, book.epub, coordinates)
+    with reader_session(root) as reader, reader(root, book) as opened:
+        yield opened

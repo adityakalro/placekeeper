@@ -6,7 +6,7 @@ from urllib.parse import parse_qs, urlsplit
 from placekeeper.plugins.contracts import Plugin
 from placekeeper.storage import private_json
 from . import registration as kindle
-from .reader import open_reader
+from .reader import open_reader, reader_session
 from .legacy_catalog import books, discover, invalidate
 
 FILES = ('amazon-device.json', 'amazon-kindle-download-device.json')
@@ -58,4 +58,4 @@ PLUGIN = Plugin('kindle', 'Kindle', FILES,
               'consent': 'Allow Placekeeper to register a Kindle device and save its access.'},
              {'id': 'finish', 'label': 'Complete connection', 'after': 'start',
               'fields': [{'name': 'completion_url', 'label': 'Paste the Amazon completion-page address', 'type': 'url'}]}),
-    setup=setup, reader=open_reader, books=books, discover=discover, disconnect=invalidate, catalog_requires=('readest',))
+    setup=setup, reader=open_reader, reader_session=reader_session, books=books, discover=discover, disconnect=invalidate, catalog_requires=('readest',))

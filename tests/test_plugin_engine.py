@@ -220,6 +220,25 @@ class PluginEngineTests(unittest.TestCase):
         self.assertIsNone(reader.target(60_000, current))
         self.assertEqual(reader.target(60_001, current), 60_001)
 
+    def test_ebook_sessions_reuse_connections_across_books(self):
+        registry = installed()
+        (self.root/'amazon-device.json').write_text('{}')
+        (self.root/'crosspoint-auth.json').write_text('{"username":"test","auth_key":"test"}')
+        for service in ('kindle', 'crosspoint'):
+            with self.subTest(service=service), \
+                    patch('placekeeper.plugins.kindle.reader.Authenticator.from_dict') as auth:
+                with registry[service].reader_session(self.root) as open_reader:
+                    client = None
+                    for name in ('first', 'second', 'third'):
+                        book = Book(name, name, 'map', {service: name}, self.root/'book.epub', Mock())
+                        with open_reader(self.root, book) as reader:
+                            if client is None:
+                                client = reader.client
+                            self.assertIs(reader.client, client)
+                            self.assertFalse(client.is_closed)
+                    self.assertEqual(auth.call_count, int(service == 'kindle'))
+                self.assertTrue(client.is_closed)
+
     def test_one_libby_shelf_request_per_job(self):
         registry = installed()
         libby = Libby(self.root/'libby-device.json')

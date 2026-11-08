@@ -1,5 +1,6 @@
 """Translate Kindle sidecar progress to verified text anchors."""
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
+from functools import cache
 import json
 
 from audible import Authenticator
@@ -49,11 +50,27 @@ class KindleReader:
 
 
 @contextmanager
+def reader_session(root):
+    with ExitStack() as stack:
+        @cache
+        def connect():
+            auth = Authenticator.from_dict(json.loads((root/'amazon-device.json').read_text()))
+            client = stack.enter_context(httpx.Client(timeout=20, follow_redirects=False))
+            return client, auth
+
+        @contextmanager
+        def reader(root, book):
+            binding = book.bindings.get('kindle')
+            if binding is None or book.mapper is None:
+                yield None
+                return
+            client, auth = connect()
+            yield KindleReader(client, auth, binding, book.mapper, book.bindings.get('kindle_kind', 'PDOC'))
+
+        yield reader
+
+
+@contextmanager
 def open_reader(root, book):
-    binding = book.bindings.get('kindle')
-    if binding is None or book.mapper is None:
-        yield None
-        return
-    auth = Authenticator.from_dict(json.loads((root/'amazon-device.json').read_text()))
-    with httpx.Client(timeout=20, follow_redirects=False) as client:
-        yield KindleReader(client, auth, binding, book.mapper, book.bindings.get('kindle_kind', 'PDOC'))
+    with reader_session(root) as reader, reader(root, book) as opened:
+        yield opened

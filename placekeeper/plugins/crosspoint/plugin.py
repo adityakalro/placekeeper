@@ -2,7 +2,7 @@
 from placekeeper.plugins.contracts import Plugin
 from placekeeper.storage import private_json
 from .client import SERVER, authenticate
-from .reader import open_reader
+from .reader import open_reader, reader_session
 
 FILE = 'crosspoint-auth.json'
 
@@ -23,4 +23,4 @@ PLUGIN = Plugin('crosspoint', 'CrossPoint', (FILE,),
     actions=({'id': 'start', 'label': 'Connect CrossPoint',
               'fields': [{'name': 'username', 'label': 'Sync username'},
                          {'name': 'password', 'label': 'Sync password', 'type': 'password'}]},),
-    setup=setup, reader=open_reader)
+    setup=setup, reader=open_reader, reader_session=reader_session)
