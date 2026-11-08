@@ -34,16 +34,20 @@ def relocate(data_root, previous_root):
     state_path=data_root/'onboarding/state.json'
     if state_path.exists():
         state=json.loads(state_path.read_text())
-        ready=[]
+        registry_path = data_root/'onboarding/ready-profiles.json'
+        registry = json.loads(registry_path.read_text()) if registry_path.exists() else {
+            'schema_version': 1, 'automatic_progress_writes_enabled': False}
+        ready = {}
         for doc,job in state['jobs'].items():
             if 'profile' in job:job['profile']=path(job['profile'])
             for record in job.get('files',{}).values():record['path']=path(record['path'])
             if job.get('status')=='ready':
                 job['profile_sha256']=hashlib.sha256(Path(job['profile']).read_bytes()).hexdigest()
-                ready.append({'document':doc,'path':job['profile'],'sha256':job['profile_sha256']})
+                ready[doc] = {'document':doc,'path':job['profile'],'sha256':job['profile_sha256']}
+        membership = [entry['document'] for entry in registry['profiles']] if 'profiles' in registry else list(ready)
+        registry['profiles'] = [ready[doc] for doc in membership if doc in ready]
         private_json(state_path,state)
-        private_json(data_root/'onboarding/ready-profiles.json',{'schema_version':1,'profiles':ready,
-                     'automatic_progress_writes_enabled':False})
+        private_json(registry_path,registry)
     return {'profiles_relocated':len(profiles),'data_root':str(data_root)}
 
 
