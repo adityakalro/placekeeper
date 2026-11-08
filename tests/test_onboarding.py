@@ -1,10 +1,11 @@
 import contextlib
+from hashlib import md5
 import json
 from pathlib import Path
 import shutil
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from zipfile import ZipFile
 
 import httpx
@@ -64,6 +65,59 @@ class OnboardingTests(unittest.TestCase):
         self.stack.close();self.temp.cleanup()
     def engine(self):
         return Onboarder(self.root,'unused-auth','unused-parser',self.source,self.catalog)
+
+    def test_loan_discovery_checks_x4_before_kindle_and_reports_store_mapping_failure(self):
+        store_title = 'Second Novel'
+        missing_title = 'Third Novel'
+        self.source.items += [
+            {'id':'b'*28,'title':store_title,'author':'An Author'},
+            {'id':'c'*28,'title':missing_title,'author':'An Author'},
+        ]
+        self.catalog.documents[DOC]['kind'] = 'PDOC'
+        for asin, title in [('B000000001', store_title), ('B000000002', missing_title)]:
+            self.catalog.documents[asin] = {
+                'document':asin,'kind':'EBOK','title':title,'authors':['Author, An'],
+            }
+        order = []
+        libby = Mock()
+        libby.audiobook_loans.side_effect = lambda: order.append('libby') or [
+            {'title':title,'firstCreatorName':author}
+            for title, author in [(store_title,'An Author'), (TITLE,'Placekeeper'), (missing_title,'An Author')]
+        ]
+        def crosspoint(request):
+            order.append('x4')
+            self.assertEqual(request.method, 'GET')
+            document = request.url.path.rsplit('/', 1)[1]
+            if document == md5((missing_title + '.epub').encode()).hexdigest():
+                return httpx.Response(404)
+            return httpx.Response(200,json={'document':document,'progress':'saved'})
+        def kindle(previous):
+            order.append('kindle')
+            return {'documents':self.catalog.documents,'pages':1}
+        private_json(self.root/'crosspoint-auth.json',{'username':'test','auth_key':'test'})
+        client = httpx.Client(transport=httpx.MockTransport(crosspoint))
+        with patch('placekeeper.plugins.kindle.loan_discovery.Libby',return_value=libby), \
+                patch('placekeeper.plugins.kindle.loan_discovery.httpx.Client',return_value=client), \
+                patch.object(self.catalog,'pull',side_effect=kindle), \
+                patch('placekeeper.plugins.kindle.onboarding.extract_chapters',side_effect=ValueError('Unsupported voucher')):
+            report = self.engine().run_once(self.root)
+        self.assertEqual(order,['libby','x4','x4','x4','kindle'])
+        self.assertEqual(report['matches'],[
+            {'title':store_title,'kind':'EBOK','status':'retry'},
+            {'title':TITLE,'kind':'PDOC','status':'ready'},
+        ])
+        self.assertEqual(self.downloads,1)
+        registry=json.loads((self.root/'ready-profiles.json').read_text())
+        self.assertEqual([entry['document'] for entry in registry['profiles']],[DOC])
+
+    def test_no_active_loans_still_builds_maps_for_two_reader_sync(self):
+        engine=self.engine()
+        with patch('placekeeper.plugins.kindle.loan_discovery.Libby') as libby:
+            libby.return_value.audiobook_loans.return_value=[]
+            report=engine.run_once(self.root)
+        self.assertEqual(report['matches'],[])
+        registry=json.loads((self.root/'ready-profiles.json').read_text())
+        self.assertEqual([entry['document'] for entry in registry['profiles']],[DOC])
 
     def test_fresh_detection_to_usable_profile_then_restart_is_cached(self):
         engine=self.engine();first=engine.run_once()
@@ -149,15 +203,16 @@ class PaginationTests(unittest.TestCase):
                 self.assertNotIn('last_sync_time',request.url.params)
                 return httpx.Response(200,text=f'<response><has_more>true</has_more><sync_time>one</sync_time><add_update_list><meta_data><ASIN>{DOC}</ASIN><title>{TITLE}</title><cde_contenttype>PDOC</cde_contenttype></meta_data></add_update_list></response>')
             self.assertEqual(request.url.params['last_sync_time'],'one')
-            return httpx.Response(200,text='<response><has_more>false</has_more><sync_time>two</sync_time><removal_list><meta_data><ASIN>OLD</ASIN></meta_data></removal_list></response>')
+            return httpx.Response(200,text='<response><has_more>false</has_more><sync_time>two</sync_time><add_update_list><meta_data><ASIN>B000000001</ASIN><title>Store Book</title><cde_contenttype>EBOK</cde_contenttype></meta_data></add_update_list><removal_list><meta_data><ASIN>OLD</ASIN></meta_data></removal_list></response>')
         with tempfile.TemporaryDirectory() as d:
             auth=Path(d)/'auth';auth.write_text('{}')
             with patch('placekeeper.plugins.kindle.catalog.Authenticator.from_dict',return_value=None):
                 catalog=AmazonCatalog(auth,httpx.Client(transport=httpx.MockTransport(respond)))
-            try:r=catalog.pull({'documents':{'OLD':{}}})
+            try:r=catalog.pull({'documents':{'OLD':{}},'cursor':'legacy'})
             finally:catalog.close()
         self.assertEqual(r['pages'],2);self.assertEqual(r['cursor'],'two')
-        self.assertEqual(set(r['documents']),{DOC})
+        self.assertEqual(set(r['documents']),{DOC,'B000000001'})
+        self.assertEqual(r['documents']['B000000001']['kind'],'EBOK')
 
     def test_nonadvancing_pagination_cannot_commit(self):
         with tempfile.TemporaryDirectory() as d:

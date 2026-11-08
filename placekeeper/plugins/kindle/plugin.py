@@ -53,7 +53,7 @@ def setup(root, pending, action, data):
 
 
 PLUGIN = Plugin('kindle', 'Kindle', FILES,
-    'Sign in to link your Send to Kindle library and reading progress.',
+    'Sign in to link your Kindle library and reading progress.',
     actions=({'id': 'start', 'label': 'Start Amazon sign-in',
               'consent': 'Allow Placekeeper to register a Kindle device and save its access.'},
              {'id': 'finish', 'label': 'Complete connection', 'after': 'start',

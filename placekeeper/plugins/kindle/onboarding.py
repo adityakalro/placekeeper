@@ -1,4 +1,4 @@
-"""Read-only new-book onboarding: Amazon PDOCs -> Readest EPUBs -> text maps.
+"""Discover matching titles and verify text maps for Kindle personal documents.
 
 No reading-progress writes. Uncertain matches are quarantined for review.
 """
@@ -22,6 +22,8 @@ import httpx
 
 from placekeeper.plugins.kindle.catalog import AmazonCatalog
 from placekeeper.plugins.kindle.delivery import download_kfx, probe
+from placekeeper.plugins.kindle.loan_discovery import kindle_matches, matches as metadata_matches, x4_loans
+from placekeeper.plugins.kindle.store_mapping import StoreMapper, extract_chapters
 from placekeeper.plugins.readest.client import ReadestSource
 from placekeeper.storage import ROOT, private_json, state_lock
 from placekeeper.mapping.text import Mapper, epub_index, kfx_index
@@ -183,24 +185,78 @@ class Onboarder:
                 'profile_sha256':file_hash(profile_path),
                 'files':files,'catalog_signature':catalog_signature}
 
-    def run_once(self):
+    def onboard_store(self, document, books, signature):
+        possible = [book for book in books if metadata_matches(
+            book['title'], [book.get('author')], document['title'], document['authors'])]
+        if not possible:
+            return {'status': 'waiting_for_epub', 'catalog_signature': signature}
+        if len(possible) != 1:
+            return {'status': 'needs_review', 'catalog_signature': signature}
+        candidate = possible[0]
+        filename = candidate['title'] + '.epub'
+        if (any(c in filename for c in '<>:"/\\|?*') or any(ord(c) < 32 for c in filename)
+                or sum(book['title'] == candidate['title'] for book in books) != 1):
+            return {'status': 'needs_review', 'catalog_signature': signature}
+        directory = self.root/'books'/document['document']
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        epub = self.root/'epubs'/(candidate['id']+'.epub')
+        if not epub.exists():
+            epub = self.source.download(candidate, self.root/'epubs')
+        table = extract_chapters(document['document'], self.auth, self.kfxlib)
+        StoreMapper(epub, table)
+        table_path = directory/'chapters.json'
+        private_json(table_path, table)
+        files = {key: {'path': str(path.resolve()), 'sha256': file_hash(path)}
+                 for key, path in [('epub', epub), ('chapters', table_path)]}
+        profile = directory/'profile.json'
+        private_json(profile, {
+            'schema_version': 3, 'kind': 'EBOK', 'document': document['document'],
+            'crosspoint_document': hashlib.md5(filename.encode()).hexdigest(),
+            'readest_id': candidate['id'], 'x4_filename': filename, 'files': files,
+        })
+        return {'status': 'ready', 'profile': str(profile), 'readest_id': candidate['id'],
+                'profile_sha256': file_hash(profile), 'files': files, 'catalog_signature': signature}
+
+    def run_once(self, loan_root=None):
         with state_lock(self.state_path):
             if self.state_path.exists():
                 self.state=json.loads(self.state_path.read_text())
             # Do not commit a partial Amazon cursor or an incomplete EPUB list.
+            x4_books,books=x4_loans(loan_root,self.source) if loan_root is not None else ([],None)
             amazon=self.catalog.pull(self.state.get('amazon',{}))
-            books=self.source.books()
+            if books is None:
+                books=self.source.books()
+            documents=amazon['documents']
+            selected=kindle_matches(x4_books,documents)
             signature=hashlib.sha256(json.dumps(sorted(books,key=lambda b:b['id']),sort_keys=True).encode()).hexdigest()
             self.state['amazon']=amazon
             events=[]
-            for doc,document in amazon['documents'].items():
+            ready=[]
+            # Prioritize three-service matches and retain Kindle maps for two-service sync.
+            ordered = dict.fromkeys([*selected, *documents])
+            ordered = sorted(ordered, key=lambda doc: documents[doc].get('kind') == 'EBOK')
+            mapped_editions = set()
+            for doc in ordered:
+                document=documents[doc]
+                store_book=document.get('kind')=='EBOK'
+                if store_book and not any(metadata_matches(book['title'], [book.get('author')],
+                                                           document['title'], document['authors'])
+                                          for book in books):
+                    continue
+                candidate=selected.get(doc)
+                candidates_for_doc=books if candidate is None else [candidate]
                 old=self.state['jobs'].get(doc,{})
-                if old.get('status')=='ready' and old.get('catalog_signature')==signature:
+                same_candidate=candidate is None or old.get('readest_id')==candidate['id']
+                if old.get('status')=='ready' and old.get('catalog_signature')==signature and same_candidate:
                     damaged=[name for name,v in old.get('files',{}).items()
                              if not Path(v['path']).exists() or file_hash(v['path'])!=v['sha256']]
                     if not damaged and Path(old['profile']).exists() \
                             and file_hash(old['profile'])==old.get('profile_sha256'):
-                        events.append({'document':doc,'status':'cached'});continue
+                        events.append({'document':doc,'status':'cached'})
+                        if old.get('readest_id') not in mapped_editions:
+                            ready.append(doc)
+                            mapped_editions.add(old.get('readest_id'))
+                        continue
                     # Only clear our own generated cache, never an arbitrary
                     # path supplied in edited state. Recover from corruption by
                     # re-fetching the EPUB or extracting the map again.
@@ -212,26 +268,39 @@ class Onboarder:
                         for name in ('content.json','locations.json','source.json'):
                             (self.root/'books'/doc/'map'/name).unlink(missing_ok=True)
                 if old.get('next_retry',0)>time.time() and old.get('catalog_signature')==signature:
-                    events.append({'document':doc,'status':'retry_deferred'});continue
+                    events.append({'document':doc,'status':'retry_deferred'})
+                    continue
                 try:
-                    job=self.onboard(document,books,signature)
-                except (ValueError,OSError,ET.ParseError,BadZipFile,KeyError,StopIteration) as error:
+                    job=(self.onboard_store(document,books,signature) if store_book
+                         else self.onboard(document,candidates_for_doc,signature))
+                except (ValueError,OSError,ET.ParseError,BadZipFile,KeyError,StopIteration,httpx.HTTPError) as error:
                     # Status contains the error category, not remote URLs or
                     # payloads that might carry secrets or book prose.
                     job={'status':'retry','error_type':type(error).__name__,
                          'next_retry':time.time()+300,'catalog_signature':signature}
                 self.state['jobs'][doc]=job
                 events.append({'document':doc,'status':job['status']})
+                if job['status']=='ready' and job.get('readest_id') not in mapped_editions:
+                    ready.append(doc)
+                    mapped_editions.add(job.get('readest_id'))
                 private_json(self.state_path,self.state)
-            for doc in set(self.state['jobs'])-set(amazon['documents']):
+            for doc in set(self.state['jobs'])-set(documents):
                 self.state['jobs'][doc]['status']='removed'
             private_json(self.state_path,self.state)
-            private_json(self.root/'ready-profiles.json',{'schema_version':1,
-                'profiles':[{'document':doc,'path':job['profile'],'sha256':job['profile_sha256']}
-                            for doc,job in self.state['jobs'].items() if job['status']=='ready'],
-                'automatic_progress_writes_enabled':False})
+            profiles=[{'document':doc,'path':self.state['jobs'][doc]['profile'],
+                       'sha256':self.state['jobs'][doc]['profile_sha256']} for doc in ready]
+            private_json(self.root/'ready-profiles.json',{'schema_version':1,'profiles':profiles,
+                                            'automatic_progress_writes_enabled':False})
             report={'mode':'onboarding_only','progress_writes':0,'events':events,
-                    'amazon_pages':amazon['pages'],'readest_books':len(books)}
+                    'amazon_pages':amazon['pages'],
+                    'readest_books':len(books)}
+            if loan_root is not None:
+                statuses={event['document']:event['status'] for event in events}
+                report['matches']=[
+                    {'title':book['title'],'kind':documents[doc].get('kind','PDOC'),
+                     'status':'ready' if doc in ready else statuses.get(doc,'mapping_required')}
+                    for doc,book in selected.items()
+                ]
             private_json(self.root/'last-run.json',report)
             return report
 
@@ -242,6 +311,7 @@ def main():
     p.add_argument('--amazon-auth',type=Path,default=ROOT/'.private/amazon-kindle-download-device.json')
     p.add_argument('--readest-auth',type=Path,default=ROOT/'.private/readest-device.json')
     p.add_argument('--kfxlib-parent',type=Path,default=ROOT/'.private/vendor/python')
+    p.add_argument('--loan-root',type=Path,help='Discover from active Libby loans and saved X4 positions')
     p.add_argument('--watch',action='store_true')
     p.add_argument('--interval',type=int,default=300)
     args=p.parse_args()
@@ -252,7 +322,7 @@ def main():
         engine=Onboarder(args.root,args.amazon_auth,args.kfxlib_parent,source,catalog)
         while True:
             try:
-                report=engine.run_once()
+                report=engine.run_once(args.loan_root)
                 print(json.dumps({'status':'onboarding_complete','mode':report['mode'],
                     'counts':dict(Counter(e['status'] for e in report['events'])),
                     'amazon_pages':report['amazon_pages'],'readest_books':report['readest_books'],

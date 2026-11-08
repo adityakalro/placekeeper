@@ -8,7 +8,7 @@ Placekeeper helps you pick up where you left off across Send to Kindle documents
 - An Amazon account with a **Send to Kindle** personal document and the matching EPUB in **Readest Cloud**. Use the same ebook edition in both places.
 - At least one sync destination. Use the sync account configured on your **CrossPoint X4**, an active **Libby audiobook loan**, or both.
 
-Each installation uses one household’s accounts. The included Kindle catalog uses Readest to match editions. Additional plugins can provide their own verified catalogs. Kindle positions are approximate to a location bucket, and Libby positions are approximate within matched chapters. Amazon purchases and other document formats have not been validated.
+Each installation uses one household’s accounts. The included Kindle catalog uses Readest to match editions. Additional plugins can provide their own verified catalogs. Kindle positions are approximate to a location bucket, and Libby positions are approximate within matched chapters. Placekeeper can build maps for Send to Kindle documents and supported Kindle Store books. Store maps align numbered chapters and estimate positions within each chapter.
 
 ## 1. Install Placekeeper
 
@@ -60,6 +60,12 @@ Once Setup says **Ready to sync**, return to the **Sync** page. The credentials 
 4. On the destination, use **Sync Progress** on X4, **Sync to Furthest Page Read** on Kindle, or **Shelf → Actions → Synchronize Shelf** in Libby. Open the book or audiobook to pick up the saved position.
 
 For future handoffs, sync the device you were using before clicking **Sync now**. Books with matching Libby loans use the newest saved progress timestamp. Books with Kindle and X4 progress alone move forward. Kindle keeps its furthest-read marker. In **Setup**, you can enable automatic progress sync every 30 minutes. It starts off disabled, and the Sync page shows whether it is on. Both **Sync now** and the schedule use existing maps. Use **Find new books** when you add a title.
+
+## How Find new books selects titles
+
+With Libby and CrossPoint connected, Placekeeper starts with active Libby audiobook loans. It matches the title and author to the Readest EPUB catalog and checks for a saved X4 position using the EPUB filename. Then it checks the Kindle library for a matching personal document or Kindle store book. Run **Sync Progress** on the X4 once for a book to make it discoverable. Keep the Readest filename and use filename matching on the X4.
+
+The discovery result lists the titles found on all three services. When both copies map to the same EPUB, the verified personal document takes precedence. For Store editions, Placekeeper downloads chapter and location data using the connected Kindle device and a compatible Amazon voucher. If Amazon denies delivery or the chapter sequences disagree, the Store copy stays out of progress sync. If a mapped book is missing from Libby or the X4, the other two readers can still sync when both have saved positions.
 
 ## Using only some services
 

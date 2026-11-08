@@ -20,14 +20,18 @@ def invalidate(root):
 def discover(root, connected):
     if not {'kindle', 'readest'} <= connected:
         return {}
+    options = ['--loan-root', str(root)] if {'crosspoint', 'libby'} <= connected else []
     result = subprocess.run([sys.executable, '-m', 'placekeeper.plugins.kindle.onboarding',
         '--root', str(root/'onboarding'), '--amazon-auth', str(root/'amazon-kindle-download-device.json'),
-        '--readest-auth', str(root/'readest-device.json'), '--kfxlib-parent', str(root/'vendor/python')],
+        '--readest-auth', str(root/'readest-device.json'), '--kfxlib-parent', str(root/'vendor/python'), *options],
         capture_output=True, timeout=900, cwd=ROOT)
     if result.returncode:
         raise ReadFailure('Could not refresh Kindle and Readest book matches.')
     report = json.loads((root/'onboarding/last-run.json').read_text())
-    return dict(Counter(event['status'] for event in report['events']))
+    counts = dict(Counter(event['status'] for event in report['events']))
+    if 'matches' in report:
+        counts['matches'] = report['matches']
+    return counts
 
 
 def legacy_state(directory):
@@ -68,9 +72,11 @@ def books(root):
             if not epub.is_absolute():
                 epub = path.resolve().parent.parent / epub
             title = profile.get('x4_filename', epub.name).removesuffix('.epub')
-            yield Book('kindle:' + document, title,
-                       ":".join(profile['files'][name]['sha256'] for name in ('epub', 'content', 'locations')),
-                       {'kindle': document, 'crosspoint': profile['crosspoint_document']},
+            kind = profile.get('kind', 'PDOC')
+            names = ('epub', 'chapters') if kind == 'EBOK' else ('epub', 'content', 'locations')
+            edition = ":".join(profile['files'][name]['sha256'] for name in names)
+            yield Book('kindle:' + document, title, edition,
+                       {'kindle': document, 'kindle_kind': kind, 'crosspoint': profile['crosspoint_document']},
                        epub, mapper,
                        lambda doc=document: legacy_state(root/'manual-sync'/doc))
         except (ValueError, OSError, KeyError):

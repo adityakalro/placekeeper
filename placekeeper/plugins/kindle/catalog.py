@@ -1,4 +1,4 @@
-"""Incremental Kindle personal-document catalog."""
+"""Incremental Kindle library catalog."""
 import json
 from pathlib import Path
 import re
@@ -15,8 +15,9 @@ class AmazonCatalog:
 
     def pull(self, previous):
         """Stage all pages before returning a new delta cursor/catalog."""
-        catalog = dict(previous.get('documents', {}))
-        cursor = previous.get('cursor')
+        # Old cursors skipped store books. Rebuild once to include older purchases.
+        cursor = previous.get('cursor') if previous.get('includes_store_books') else None
+        catalog = dict(previous.get('documents', {})) if cursor else {}
         seen = set()
         for page in range(100):
             params = {'item_count':1000}
@@ -31,12 +32,13 @@ class AmazonCatalog:
                 raise ValueError(f'Amazon library returned HTTP {r.status_code}')
             root = ET.fromstring(r.content)
             for book in root.findall('./add_update_list/meta_data'):
-                if book.findtext('cde_contenttype') != 'PDOC':
+                kind = book.findtext('cde_contenttype')
+                if kind not in ('PDOC', 'EBOK'):
                     continue
                 doc = book.findtext('ASIN','')
                 if not re.fullmatch(r'[A-Z0-9]{10,64}',doc):
                     raise ValueError('Amazon returned an invalid document ID')
-                catalog[doc] = {'document':doc, 'title':book.findtext('title',''),
+                catalog[doc] = {'document':doc, 'kind':kind, 'title':book.findtext('title',''),
                                 'authors':[a.text for a in book.iter('author') if a.text]}
             removals = root.find('removal_list')
             if removals is not None:
@@ -47,7 +49,7 @@ class AmazonCatalog:
             if not next_cursor:
                 raise ValueError('Amazon library returned no sync cursor')
             if not more:
-                return {'cursor':next_cursor,'documents':catalog,'pages':page+1}
+                return {'cursor':next_cursor,'documents':catalog,'pages':page+1,'includes_store_books':True}
             if next_cursor == cursor or next_cursor in seen:
                 raise ValueError('Amazon library pagination did not advance; checkpoint preserved')
             seen.add(next_cursor)

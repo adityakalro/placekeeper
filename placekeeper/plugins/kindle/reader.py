@@ -13,13 +13,14 @@ from .progress import fetch_progress_time, kindle_position, read_sidecar, write_
 class KindleReader:
     prefer_recent = False
 
-    def __init__(self, client, auth, document, mapper):
+    def __init__(self, client, auth, document, mapper, kind="PDOC"):
         self.client, self.auth, self.document, self.mapper = client, auth, document, mapper
-        self.get = json_reader(client)
+        self.kind = kind
+        self.get = json_reader(client, missing_status=404 if kind == "EBOK" else None)
 
     def read(self, hint):
-        self.sidecar = read_sidecar(self.get, self.auth, self.document)
-        position = kindle_position(self.sidecar, self.document)
+        self.sidecar = read_sidecar(self.get, self.auth, self.document, self.kind)
+        position = kindle_position(self.sidecar, self.document, self.kind)
         coordinates = self.mapper.epub.coordinates
         anchor = coordinates.at_or_after(self.mapper.from_sidecar(position)['xpointer'])
         receipt, pending = hint['receipt'], hint['pending']
@@ -29,7 +30,7 @@ class KindleReader:
             return Observation(position, anchor, pending['stamp'], own=True)
         stamp = None
         if hint['need_timestamp']:
-            stamp = fetch_progress_time(self, {'document': self.document}, self.sidecar, position).timestamp()
+            stamp = fetch_progress_time(self, {'document': self.document, 'kind': self.kind}, self.sidecar, position).timestamp()
         return Observation(position, anchor, stamp, 60)
 
     def bucket(self, anchor):
@@ -44,7 +45,7 @@ class KindleReader:
 
     def write(self, target):
         check_write(write_position(self.client, self.auth, self.document,
-                                   self.sidecar['payload'].get('guid'), target), 'Kindle')
+                                   self.sidecar['payload'].get('guid'), target, self.kind), 'Kindle')
 
 
 @contextmanager
@@ -55,4 +56,4 @@ def open_reader(root, book):
         return
     auth = Authenticator.from_dict(json.loads((root/'amazon-device.json').read_text()))
     with httpx.Client(timeout=20, follow_redirects=False) as client:
-        yield KindleReader(client, auth, binding, book.mapper)
+        yield KindleReader(client, auth, binding, book.mapper, book.bindings.get('kindle_kind', 'PDOC'))

@@ -155,6 +155,21 @@ class PluginEngineTests(unittest.TestCase):
         self.assertEqual(json.loads((self.root/'fourth-reader.json').read_text()), 600)
         self.assertEqual(jobs.sync_books(lambda _: None)[0]['writes'], 0)
 
+    def test_kindle_syncs_with_either_available_partner(self):
+        for missing, partner in [('crosspoint', 'libby'), ('libby', 'crosspoint')]:
+            with self.subTest(missing=missing):
+                kindle = Reader(10, 100)
+                other = Reader(100, 300, recent=(partner == 'libby'))
+                absent = Mock()
+                absent.read.side_effect = MissingProgress('No saved position')
+                absent.prefer_recent = False
+                result = execute({'kindle': kindle, partner: other, missing: absent},
+                                 {'receipts': {}}, self.path)
+                self.assertEqual(result['status'], 'synced')
+                self.assertEqual(result['source'], partner)
+                self.assertEqual(kindle.writes, [100])
+                absent.write.assert_not_called()
+
     def test_read_error_blocks_writes_but_missing_reader_does_not(self):
         first, second = Reader(10), Reader(100)
         optional = Mock()

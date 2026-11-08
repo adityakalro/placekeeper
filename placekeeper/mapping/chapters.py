@@ -9,7 +9,9 @@ from zipfile import ZipFile
 
 
 def chapter_key(label):
-    label = unicodedata.normalize('NFKC', label).casefold()
+    label = unicodedata.normalize('NFKC', label).casefold().strip()
+    if label.isdecimal():
+        return 'chapter ' + str(int(label))
     match = re.search(r'\bchapter\s+([\w-]+(?:\s+(?:one|two|three|four|five|six|seven|eight|nine))?)', label)
     if match:
         value = match[1].replace('-', ' ')

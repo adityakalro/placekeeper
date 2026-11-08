@@ -47,7 +47,7 @@ class Plugin:
     setup: Callable | None = None
     reader: Callable | None = None  # (root, book) -> context manager yielding Reader or None
     books: Callable | None = None  # (root) -> iterable of verified Book objects
-    discover: Callable | None = None  # (root, connected plugin IDs) -> status counts
+    discover: Callable | None = None  # (root, connected plugin IDs) -> status counts and optional matches list
     disconnect: Callable | None = None
     catalog_requires: tuple[str, ...] = ()
 

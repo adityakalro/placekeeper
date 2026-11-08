@@ -8,7 +8,7 @@ pip_args=()
 requirements=requirements-onboarding.txt
 if command -v termux-info >/dev/null && command -v pkg >/dev/null; then
     echo 'Installing Placekeeper for Termux.'
-    pkg install -y git python python-pip python-pillow python-lxml
+    pkg install -y git python python-pip python-pillow python-lxml python-pycryptodomex
     # Use Termux’s packaged pip and native Python modules.
     venv_args+=(--system-site-packages --without-pip)
     pip_args+=(--only-binary=Pillow,lxml)
@@ -52,7 +52,7 @@ if ! python3 -m venv "${venv_args[@]}" .venv; then
 fi
 .venv/bin/python -m pip install "${pip_args[@]}" -r "$requirements"
 .venv/bin/python -m pip check
-.venv/bin/python -c 'import audible, httpx, PIL, lxml.etree'
+.venv/bin/python -c 'import audible, httpx, PIL, lxml.etree, Cryptodome'
 
 (
     umask 077

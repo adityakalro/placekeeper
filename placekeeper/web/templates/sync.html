@@ -11,6 +11,7 @@
   <p class="muted">Find and map new books so their progress can sync.</p>
   <button id="discover" class="primary secondary" disabled>Find new books</button>
   <p class="meta" id="discoveryResult" role="status">No discovery run yet.</p>
+  <ul id="discoveryMatches" class="muted" hidden></ul>
 </section>
 <section class="card steps"><div><strong>Before you sync</strong><p>Sync your current reader so its latest position reaches the cloud.</p></div><div><strong>On your other reader</strong><p>Sync the destination reader and reopen the book to pick up the update.</p></div></section><footer>Home network or WireGuard VPN</footer></main>
 <script nonce="NONCE">
@@ -55,8 +56,23 @@ function render(s){
   const discovery=s.last_discovery||(last?.discovery?last:null);
   if(discovery){
     const counts=discovery.discovery||{};
-    const summary=discovery.message||((counts.ready||0)+' new maps · '+(counts.waiting_for_epub||0)+' waiting for a matching ebook'+(counts.discovery_error?' · '+counts.discovery_error+' catalog refresh failed':''));
+    const matches=counts.matches;
+    const summary=discovery.message||(matches
+      ? matches.length+' titles matched across Libby, X4, and Kindle · '+((counts.ready||0)+(counts.cached||0))+' verified maps available for progress sync'
+      : (counts.ready||0)+' new maps · '+(counts.waiting_for_epub||0)+' waiting for a matching ebook')
+      +(counts.discovery_error?' · '+counts.discovery_error+' catalog refresh failed':'');
     $('discoveryResult').textContent=summary+(discovery.finished_at?' · '+new Date(discovery.finished_at).toLocaleString():'');
+    const list=$('discoveryMatches');
+    list.replaceChildren();
+    list.hidden=!matches?.length;
+    for(const match of matches||[]){
+      const item=document.createElement('li');
+      const detail={ready:'Ready to sync',mapping_required:'Kindle store book matched. Progress mapping is required.',
+        edition_mismatch:'The ebook editions could not be verified.',retry:'Mapping failed. Try discovery again later.',
+        retry_deferred:'Mapping retry pending.'}[match.status]||'Map needs review.';
+      item.textContent=match.title+' · '+detail;
+      list.append(item);
+    }
   }
 }
 async function refresh(){try{render(await call('/api/status'))}catch(e){$('phase').textContent='Could not reach the Pi. Check your home Wi-Fi or WireGuard connection.'}}

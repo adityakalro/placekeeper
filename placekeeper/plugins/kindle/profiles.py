@@ -16,7 +16,9 @@ def load_profile(path):
     if not re.fullmatch(r'[a-f0-9]{32}', profile['crosspoint_document']):
         raise ValueError('Invalid CrossPoint document identifier')
     files = {}
-    for name in ('epub', 'content', 'locations'):
+    store_book = profile.get('schema_version') == 3
+    names = ('epub', 'chapters') if store_book else ('epub', 'content', 'locations')
+    for name in names:
         record = profile['files'][name]
         # Existing profiles store paths relative to the project, one level above
         # their private directory. Absolute paths also support moving a bundle.
@@ -26,6 +28,12 @@ def load_profile(path):
         if hashlib.sha256(source.read_bytes()).hexdigest() != record['sha256']:
             raise ValueError(f'{name} fingerprint differs from the validated book map')
         files[name] = source
+    if store_book:
+        from .store_mapping import StoreMapper
+        if (profile.get('kind') != 'EBOK'
+                or hashlib.md5(profile['x4_filename'].encode()).hexdigest() != profile['crosspoint_document']):
+            raise ValueError('Store profile has an unsupported identity')
+        return profile, StoreMapper(files['epub'], json.loads(files['chapters'].read_text())), digest(profile)
     mapper = Mapper(**files)
     if profile.get('schema_version') == 2:
         from placekeeper.plugins.kindle.onboarding import evaluate_pair, validate_map

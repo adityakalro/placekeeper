@@ -11,11 +11,11 @@ from placekeeper.errors import MissingProgress, ReadFailure
 KINDLE_URL = 'https://cde-ta-g7g.amazon.com/FionaCDEServiceEngine/sidecar'
 
 
-def kindle_position(data, document):
+def kindle_position(data, document, kind="PDOC"):
     payload = data.get('payload', {})
     if not isinstance(payload, dict) or not isinstance(payload.get('records'), list):
         raise ReadFailure('Kindle returned an unexpected progress structure')
-    if payload.get('key') != document or payload.get('type') != 'PDOC':
+    if payload.get('key') != document or payload.get('type') != kind:
         raise ReadFailure('Kindle response identifies a different document or type')
     values = []
     for record in payload.get('records', []):
@@ -31,16 +31,16 @@ def kindle_position(data, document):
     return max(values)
 
 
-def read_sidecar(get, auth, document):
-    return get('Kindle', KINDLE_URL, auth=auth, params={'type': 'PDOC', 'key': document})
+def read_sidecar(get, auth, document, kind="PDOC"):
+    return get('Kindle', KINDLE_URL, auth=auth, params={'type': kind, 'key': document})
 
 
-def write_position(client, auth, document, guid, target):
+def write_position(client, auth, document, guid, target, kind="PDOC"):
     if not isinstance(guid, str) or not guid:
         raise ReadFailure('Kindle returned no document sync identifier')
     stamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S%z')
     root = ElementTree.Element('annotations', {'version': '1.0', 'timestamp': stamp})
-    book = ElementTree.SubElement(root, 'book', {'key': document, 'type': 'PDOC', 'guid': guid})
+    book = ElementTree.SubElement(root, 'book', {'key': document, 'type': kind, 'guid': guid})
     ElementTree.SubElement(book, 'last_read', {'action': 'modify', 'begin': str(target),
                                               'location': '-1', 'timestamp': stamp})
     return client.post(KINDLE_URL, auth=auth, content=ElementTree.tostring(root, encoding='utf-8'),
@@ -82,7 +82,7 @@ def fetch_progress_time(sources, profile, sidecar, position):
     response = sources.client.get(
         'https://cde-ta-g7g.amazon.com/FionaCDEServiceEngine/getAnnotations',
         auth=sources.auth,
-        params={'filter': 'last_read', 'type': 'PDOC', 'key': profile['document'],
+        params={'filter': 'last_read', 'type': profile.get('kind', 'PDOC'), 'key': profile['document'],
                 'guid': sidecar['payload']['guid']},
     )
     if response.status_code != 200:

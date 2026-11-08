@@ -130,13 +130,15 @@ class Libby:
             except httpx.HTTPError:
                 raise ReadFailure('Could not reach Libby.') from None
 
-    def match(self, title, epub):
+    def audiobook_loans(self):
         if self.loans is None:
             self.loans = self.get('/chip/sync')['loans']
+        return [loan for loan in self.loans if loan.get('type', {}).get('id') == 'audiobook']
+
+    def match(self, title, epub):
         def normalize(value):
             return re.sub(r'[^\w]+', '', value.casefold())
-        candidates = [loan for loan in self.loans if loan.get('type', {}).get('id') == 'audiobook'
-                      and normalize(loan.get('title', '')) == normalize(title)]
+        candidates = [loan for loan in self.audiobook_loans() if normalize(loan.get('title', '')) == normalize(title)]
         if len(candidates) > 1:
             raise ReadFailure('More than one Libby audiobook matches this title.')
         if not candidates:
