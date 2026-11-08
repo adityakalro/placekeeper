@@ -8,7 +8,7 @@ On Debian 13, install Git and Python 3.13 with its virtual environment module:
 
 ```sh
 apt update
-apt install git python3 python3-venv
+apt install git
 ```
 
 For a fresh installation:
@@ -18,21 +18,12 @@ useradd --system --user-group --home-dir /var/lib/placekeeper --shell /usr/sbin/
 install -d -o placekeeper -g placekeeper -m 700 /var/lib/placekeeper
 git clone https://github.com/adityakalro/placekeeper.git /opt/placekeeper
 cd /opt/placekeeper
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements-onboarding.txt
 ln -s /var/lib/placekeeper .private
-install -o placekeeper -g placekeeper -m 600 deploy/web-config.example.json .private/web-config.json
+bash install.sh
+chown -R placekeeper:placekeeper /var/lib/placekeeper
 ```
 
-The service runs as `placekeeper`. Keep the app and virtual environment under `/opt/placekeeper`, and store credentials and book maps under `/var/lib/placekeeper`.
-
-From `/opt/placekeeper`, open a shell as the service user:
-
-```sh
-runuser -u placekeeper -- sh
-```
-
-In that shell, run `install -d -m 700 .private/vendor`, then follow the [KFX parser installation commands](../README.md#1-install-placekeeper). Exit the shell when finished. If PyPI is unavailable on the host, transfer wheels that match its Python version and CPU architecture and install with `pip install --no-index --find-links /path/to/wheels -r requirements-onboarding.txt`.
+The service runs as `placekeeper`. The checkout and virtual environment live under `/opt/placekeeper`. Credentials, settings, and book maps live under `/var/lib/placekeeper`.
 
 ## 2. Start the service and connect accounts
 

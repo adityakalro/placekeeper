@@ -1,10 +1,10 @@
 # Placekeeper
 
-Placekeeper helps you pick up where you left off across Send to Kindle documents, an X4 running CrossPoint, and Libby audiobooks. It runs on your own Linux host, including a Raspberry Pi Zero 2 W running DietPi. Open the private web page and click **Sync now** whenever you want to transfer your place.
+Placekeeper helps you pick up where you left off across Send to Kindle documents, an X4 running CrossPoint, and Libby audiobooks. It runs on Linux, including a Raspberry Pi Zero 2 W running DietPi, or on Android through Termux. Open the private web page and click **Sync now** whenever you want to transfer your place.
 
 ## Before you start
 
-- A Linux host with Git and Python 3.13, including its `venv` module. On Debian 13 or a DietPi install based on it, install these with `sudo apt install git python3 python3-venv`. Run the command without `sudo` if you are already root.
+- A Linux host or an Android device with Termux. You need Git to clone the repository and Python 3.13 or newer to run it.
 - An Amazon account with a **Send to Kindle** personal document and the matching EPUB in **Readest Cloud**. Use the same ebook edition in both places.
 - At least one sync destination. Use the sync account configured on your **CrossPoint X4**, an active **Libby audiobook loan**, or both.
 
@@ -12,30 +12,19 @@ Each installation uses one household’s accounts. The included Kindle catalog u
 
 ## 1. Install Placekeeper
 
-Run these commands on the Linux host as the user who will run Placekeeper:
+From a Linux or Termux shell, run:
 
 ```sh
 git clone https://github.com/adityakalro/placekeeper.git
 cd placekeeper
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements-onboarding.txt
-install -d -m 700 .private .private/vendor
+bash install.sh
 ```
 
-Install the external KFX parser into the private directory. This is the pinned source revision used by the project. Keep the checkout intact so the parser’s license and bundled modules stay with it.
-
-```sh
-git init .private/vendor/kindle.koplugin
-git -C .private/vendor/kindle.koplugin fetch --depth 1 \
-  https://github.com/kaikozlov/kindle.koplugin.git 501488fd99ace3ea143a8693b9fa7c6421101d51
-git -C .private/vendor/kindle.koplugin checkout --detach FETCH_HEAD
-ln -s kindle.koplugin/python .private/vendor/python
-```
+The installer detects Termux or Linux, creates a virtual environment, installs the Python dependencies and pinned KFX parser, and creates a localhost web configuration. Rerunning it preserves existing account data and web settings. On Debian 13 and DietPi, it uses APT for missing system prerequisites. On other Linux distributions, install Git and Python 3.13 or newer with venv and pip through your package manager first. If you need Git to clone on Debian, run `sudo apt install git`. On Termux, run `pkg install git`.
 
 ## 2. Start the private web page
 
 ```sh
-cp deploy/web-config.example.json .private/web-config.json
 .venv/bin/python -m placekeeper.web.app
 ```
 
@@ -45,7 +34,12 @@ Open [Setup](http://127.0.0.1:8780/setup) in a browser on the host. If the host 
 ssh -N -L 127.0.0.1:8780:127.0.0.1:8780 YOUR_USER@YOUR_PI_HOST
 ```
 
-Keep the tunnel open while using the same [local Setup address](http://127.0.0.1:8780/setup). For startup at boot or access over a trusted LAN or WireGuard, see the [Linux service guide](docs/deployment.md).
+Keep the tunnel open while using the same [local Setup address](http://127.0.0.1:8780/setup).
+
+### Run in the background and start at boot
+
+- **Linux and DietPi.** Install the included systemd service and run `sudo systemctl enable --now placekeeper-web.service` to start it now and at boot. See the [Linux service guide](docs/deployment.md#2-start-the-service-and-connect-accounts) for service installation and private network access.
+- **Termux.** Install `termux-services`, register Placekeeper with its supervisor, and run `sv-enable placekeeper` to run it in the background. Install Termux:Boot and add the startup script to bring it back after an Android reboot. See the [Termux guide](docs/termux.md#run-in-the-background) for the exact commands.
 
 ## 3. Connect your accounts
 
