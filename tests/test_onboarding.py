@@ -12,6 +12,7 @@ import httpx
 
 from placekeeper.plugins.kindle.catalog import AmazonCatalog
 from placekeeper.plugins.kindle.onboarding import Onboarder
+from placekeeper.plugins.kindle.store_mapping import StoreDeliveryDenied
 from placekeeper.sync.dry_run import load_profile, private_json
 from placekeeper.mapping.text import epub_index
 
@@ -150,6 +151,29 @@ class OnboardingTests(unittest.TestCase):
         self.assertEqual(self.downloads,0)
         self.source.items=items
         self.assertEqual(self.engine().run_once()['events'][0]['status'],'ready')
+
+    def test_unrelated_catalog_change_keeps_ready_map(self):
+        self.engine().run_once()
+        self.source.items.append({'id':'b'*28,'title':'Another Novel','author':'An Author'})
+        with patch.object(Onboarder, 'onboard') as onboard:
+            self.assertEqual(self.engine().run_once()['events'][0]['status'], 'cached')
+        onboard.assert_not_called()
+        self.assertEqual(self.source.download_count, 1)
+
+    def test_store_denial_backoff_survives_unrelated_catalog_change(self):
+        self.catalog.documents[DOC]['kind'] = 'EBOK'
+        with patch('placekeeper.plugins.kindle.onboarding.extract_chapters',
+                   side_effect=StoreDeliveryDenied('Forbidden')) as extract, \
+                patch('placekeeper.plugins.kindle.onboarding.time.time') as clock:
+            clock.return_value = 1000
+            self.assertEqual(self.engine().run_once()['events'][0]['status'], 'delivery_unavailable')
+            self.source.items.append({'id':'b'*28,'title':'Another Novel','author':'An Author'})
+            clock.return_value += 60
+            self.assertEqual(self.engine().run_once()['events'][0]['status'], 'delivery_unavailable')
+            self.assertEqual(extract.call_count, 1)
+            clock.return_value += 86400
+            self.engine().run_once()
+            self.assertEqual(extract.call_count, 2)
 
     def test_same_text_multiple_epubs_is_quarantined(self):
         self.source.items.append({'id':'b'*28,'title':TITLE,'author':'Placekeeper'})

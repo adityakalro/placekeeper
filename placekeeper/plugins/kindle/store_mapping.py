@@ -18,6 +18,10 @@ HOST = 'kindle-digital-delivery.amazon.com'
 MAX_RESOURCE = 32 * 1024 * 1024
 
 
+class StoreDeliveryDenied(ValueError):
+    """Amazon refused delivery of this edition to the registered device."""
+
+
 def fetch_resource(client, url, *, auth=None, headers=None):
     parsed = urlsplit(url)
     if parsed.scheme != 'https' or parsed.netloc != HOST:
@@ -46,6 +50,8 @@ def delivery(document, auth_path):
     with httpx.Client(timeout=30, follow_redirects=False) as client:
         response = client.get(f'https://{HOST}/delivery/manifest/kindle.ebook/{document}', auth=auth,
                               headers={**headers, 'x-amzn-accept-type': 'application/x.amzn.digital.deliverymanifest@1.0'})
+        if response.status_code == 403:
+            raise StoreDeliveryDenied('Kindle Store delivery was denied')
         if response.status_code != 200:
             raise ValueError(f'Kindle Store manifest returned HTTP {response.status_code}')
         manifest = response.json()

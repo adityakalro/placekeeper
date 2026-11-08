@@ -69,7 +69,7 @@ function render(s){
       const item=document.createElement('li');
       const detail={ready:'Ready to sync',mapping_required:'Kindle store book matched. Progress mapping is required.',
         edition_mismatch:'The ebook editions could not be verified.',retry:'Mapping failed. Try discovery again later.',
-        retry_deferred:'Mapping retry pending.'}[match.status]||'Map needs review.';
+        retry_deferred:'Mapping retry pending.', delivery_unavailable:'Amazon denied delivery to this device. Placekeeper will retry later.'}[match.status]||'Map needs review.';
       item.textContent=match.title+' · '+detail;
       list.append(item);
     }

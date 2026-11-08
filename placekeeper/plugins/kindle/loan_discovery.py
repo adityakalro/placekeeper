@@ -1,4 +1,5 @@
 """Find shared titles in Libby, on the X4, and in the Kindle library."""
+from collections import Counter, defaultdict
 from contextlib import closing
 from hashlib import md5
 import json
@@ -19,17 +20,26 @@ def words(value):
     return re.findall(r'[^\W_]+', unicodedata.normalize('NFKC', value).casefold())
 
 
-def matches(title, authors, other_title, other_authors):
-    def title_keys(value):
-        if not isinstance(value, str):
-            return set()
-        return {''.join(words(part)) for part in
-                (value, value.split(':')[-1], value.split(' (')[0])} - {''}
-
-    title_match = title_keys(title) & title_keys(other_title)
+def metadata_keys(title, authors):
+    if not isinstance(title, str):
+        return set()
+    titles = {''.join(words(part)) for part in
+              (title, title.split(':')[-1], title.split(' (')[0])} - {''}
     names = {tuple(sorted(words(author))) for author in authors} - {()}
-    return bool(title_match
-                and any(tuple(sorted(words(author))) in names for author in other_authors))
+    return {(key, name) for key in titles for name in names}
+
+
+class MetadataIndex:
+    def __init__(self, records, authors):
+        self.records = list(records)
+        self.index = defaultdict(list)
+        for index, record in enumerate(self.records):
+            for key in metadata_keys(record.get('title'), authors(record)):
+                self.index[key].append(index)
+
+    def find(self, title, authors):
+        indices = {index for key in metadata_keys(title, authors) for index in self.index.get(key, ())}
+        return [self.records[index] for index in sorted(indices)]
 
 
 def loan_authors(loan):
@@ -46,16 +56,17 @@ def x4_loans(root, source):
     credentials = json.loads((root/'crosspoint-auth.json').read_text())
     headers = {'x-auth-user': credentials['username'], 'x-auth-key': credentials['auth_key']}
     selected = {}
+    index = MetadataIndex(books, lambda book: [book.get('author')])
+    title_counts = Counter(book['title'] for book in books)
     with httpx.Client(timeout=20, follow_redirects=False) as client:
         get = json_reader(client, missing_status=404)
         for loan in loans:
-            possible = [book for book in books if matches(loan.get('title'), loan_authors(loan),
-                                                         book['title'], [book.get('author')])]
+            possible = index.find(loan.get('title'), loan_authors(loan))
             if len(possible) != 1:
                 continue
             book = possible[0]
             filename = book['title'] + '.epub'
-            if sum(item['title'] == book['title'] for item in books) != 1:
+            if title_counts[book['title']] != 1:
                 continue
             if book['id'] in selected:
                 continue
@@ -70,10 +81,12 @@ def x4_loans(root, source):
 
 
 def kindle_matches(x4_books, documents):
+    if not x4_books:
+        return {}
     pairs = {}
+    index = MetadataIndex(documents.values(), lambda doc: doc.get('authors', []))
     for book in x4_books:
-        editions = [doc for doc in documents.values() if matches(
-            book['title'], [book.get('author')], doc.get('title'), doc.get('authors', []))]
+        editions = index.find(book['title'], [book.get('author')])
         personal = [doc for doc in editions if doc.get('kind', 'PDOC') == 'PDOC']
         preferred = personal or editions
         if len(preferred) == 1:

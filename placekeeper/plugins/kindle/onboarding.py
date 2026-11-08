@@ -22,10 +22,10 @@ import httpx
 
 from placekeeper.plugins.kindle.catalog import AmazonCatalog
 from placekeeper.plugins.kindle.delivery import download_kfx, probe
-from placekeeper.plugins.kindle.loan_discovery import kindle_matches, matches as metadata_matches, x4_loans
-from placekeeper.plugins.kindle.store_mapping import StoreMapper, extract_chapters
+from placekeeper.plugins.kindle.loan_discovery import MetadataIndex, kindle_matches, x4_loans
+from placekeeper.plugins.kindle.store_mapping import StoreDeliveryDenied, StoreMapper, extract_chapters
 from placekeeper.plugins.readest.client import ReadestSource
-from placekeeper.storage import ROOT, private_json, state_lock
+from placekeeper.storage import ROOT, digest, private_json, state_lock
 from placekeeper.mapping.text import Mapper, epub_index, kfx_index
 
 VERSION = 1
@@ -42,8 +42,7 @@ def title_words(text):
 def candidates(document, books):
     words = title_words(document['title'])
     ranked=[]
-    for book in books:
-        other=title_words(book['title'])
+    for book, other in books:
         if not words or not other:
             continue
         score=len(words&other)/min(len(words),len(other))
@@ -131,12 +130,11 @@ class Onboarder:
             raise ValueError('KFX extraction failed; unsupported content format')
         return content,locations
 
-    def onboard(self, document, books, catalog_signature):
+    def onboard(self, document, possible, title_counts, catalog_signature):
         doc=document['document'];directory=self.root/'books'/doc
-        directory.mkdir(mode=0o700,parents=True,exist_ok=True)
-        possible=candidates(document,books)
         if not possible:
             return {'status':'waiting_for_epub','catalog_signature':catalog_signature}
+        directory.mkdir(mode=0o700,parents=True,exist_ok=True)
         book=directory/(doc+'.azw8')
         if not book.exists():
             response=probe(doc,self.auth,directory)
@@ -165,7 +163,7 @@ class Onboarder:
         filename=candidate['title']+'.epub'
         if any(c in filename for c in '<>:"/\\|?*') or any(ord(c)<32 for c in filename) or filename in ('.epub','..epub'):
             return {'status':'needs_review','reason':'unsupported_x4_filename','catalog_signature':catalog_signature}
-        if sum(b['title']==candidate['title'] for b in books)>1:
+        if title_counts[candidate['title']]>1:
             return {'status':'needs_review','reason':'x4_filename_collision','catalog_signature':catalog_signature}
         mapper=Mapper(epub,content,locations,epub_text=epub_text,kfx_text=kindle_text)
         validation=validate_map(mapper)
@@ -186,9 +184,7 @@ class Onboarder:
                 'profile_sha256':file_hash(profile_path),
                 'files':files,'catalog_signature':catalog_signature}
 
-    def onboard_store(self, document, books, signature):
-        possible = [book for book in books if metadata_matches(
-            book['title'], [book.get('author')], document['title'], document['authors'])]
+    def onboard_store(self, document, possible, title_counts, signature):
         if not possible:
             return {'status': 'waiting_for_epub', 'catalog_signature': signature}
         if len(possible) != 1:
@@ -196,7 +192,7 @@ class Onboarder:
         candidate = possible[0]
         filename = candidate['title'] + '.epub'
         if (any(c in filename for c in '<>:"/\\|?*') or any(ord(c) < 32 for c in filename)
-                or sum(book['title'] == candidate['title'] for book in books) != 1):
+                or title_counts[candidate['title']] != 1):
             return {'status': 'needs_review', 'catalog_signature': signature}
         directory = self.root/'books'/document['document']
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -224,12 +220,17 @@ class Onboarder:
                 self.state=json.loads(self.state_path.read_text())
             # Do not commit a partial Amazon cursor or an incomplete EPUB list.
             x4_books,books=x4_loans(loan_root,self.source) if loan_root is not None else ([],None)
-            amazon=self.catalog.pull(self.state.get('amazon',{}))
+            previous = self.state.get('amazon', {})
+            amazon=self.catalog.pull(previous)
             if books is None:
                 books=self.source.books()
             documents=amazon['documents']
             selected=kindle_matches(x4_books,documents)
-            signature=hashlib.sha256(json.dumps(sorted(books,key=lambda b:b['id']),sort_keys=True).encode()).hexdigest()
+            ordered_books = sorted(books, key=lambda book: book['id'])
+            legacy_signature = digest(ordered_books)
+            store_index = MetadataIndex(ordered_books, lambda book: [book.get('author')])
+            ebook_words = [(book, title_words(book['title'])) for book in ordered_books]
+            title_counts = Counter(book['title'] for book in ordered_books)
             self.state['amazon']=amazon
             events=[]
             ready=[]
@@ -240,19 +241,29 @@ class Onboarder:
             for doc in ordered:
                 document=documents[doc]
                 store_book=document.get('kind')=='EBOK'
-                if store_book and not any(metadata_matches(book['title'], [book.get('author')],
-                                                           document['title'], document['authors'])
-                                          for book in books):
-                    continue
                 candidate=selected.get(doc)
-                candidates_for_doc=books if candidate is None else [candidate]
+                if store_book:
+                    possible = store_index.find(document['title'], document['authors'])
+                    if not possible:
+                        continue
+                else:
+                    possible = [candidate] if candidate is not None else candidates(document, ebook_words)
+                signature = digest({
+                    'version': 1, 'document': document, 'candidates': possible,
+                    'title_counts': {book['title']: title_counts[book['title']] for book in possible},
+                })
                 old=self.state['jobs'].get(doc,{})
                 same_candidate=candidate is None or old.get('readest_id')==candidate['id']
-                if old.get('status')=='ready' and old.get('catalog_signature')==signature and same_candidate:
+                current=old.get('catalog_signature')==signature
+                legacy=(old.get('catalog_signature')==legacy_signature and same_candidate
+                        and previous.get('documents', {}).get(doc) == document
+                        and all(title_counts[book['title']]==1 for book in possible))
+                if old.get('status')=='ready' and (current or legacy):
                     damaged=[name for name,v in old.get('files',{}).items()
                              if not Path(v['path']).exists() or file_hash(v['path'])!=v['sha256']]
                     if not damaged and Path(old['profile']).exists() \
                             and file_hash(old['profile'])==old.get('profile_sha256'):
+                        old['catalog_signature'] = signature
                         events.append({'document':doc,'status':'cached'})
                         if old.get('readest_id') not in mapped_editions:
                             ready.append(doc)
@@ -268,12 +279,19 @@ class Onboarder:
                     if {'content','locations'} & set(damaged):
                         for name in ('content.json','locations.json','source.json'):
                             (self.root/'books'/doc/'map'/name).unlink(missing_ok=True)
-                if old.get('next_retry',0)>time.time() and old.get('catalog_signature')==signature:
-                    events.append({'document':doc,'status':'retry_deferred'})
+                if current and old.get('next_retry',0)>time.time():
+                    status = 'delivery_unavailable' if old['status'] == 'delivery_unavailable' else 'retry_deferred'
+                    events.append({'document':doc,'status':status})
+                    continue
+                if current and old.get('status') == 'waiting_for_epub':
+                    events.append({'document':doc,'status':'waiting_for_epub'})
                     continue
                 try:
-                    job=(self.onboard_store(document,books,signature) if store_book
-                         else self.onboard(document,candidates_for_doc,signature))
+                    job=(self.onboard_store(document,possible,title_counts,signature) if store_book
+                         else self.onboard(document,possible,title_counts,signature))
+                except StoreDeliveryDenied:
+                    job={'status':'delivery_unavailable','next_retry':time.time()+86400,
+                         'catalog_signature':signature}
                 except (ValueError,OSError,ET.ParseError,BadZipFile,KeyError,StopIteration,httpx.HTTPError) as error:
                     # Status contains the error category, not remote URLs or
                     # payloads that might carry secrets or book prose.
@@ -284,7 +302,8 @@ class Onboarder:
                 if job['status']=='ready' and job.get('readest_id') not in mapped_editions:
                     ready.append(doc)
                     mapped_editions.add(job.get('readest_id'))
-                private_json(self.state_path,self.state)
+                if job['status'] == 'ready':
+                    private_json(self.state_path,self.state)
             for doc in set(self.state['jobs'])-set(documents):
                 self.state['jobs'][doc]['status']='removed'
             private_json(self.state_path,self.state)
