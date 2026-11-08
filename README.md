@@ -111,6 +111,8 @@ To preview a handoff using the same planner as **Sync now**:
 .venv/bin/python -m placekeeper.sync.preview
 ```
 
+The preview uses the connected services and mapped books from your installation. The older `placekeeper.sync.dry_run` command is an alias for this preview and accepts the same `--data-root` option.
+
 ## Code layout
 
 Service adapters live in `placekeeper/plugins/`. The sync jobs in `placekeeper/sync/` match books and decide which positions to update. Shared text and chapter maps live in `placekeeper/mapping/`, and the web server and templates live in `placekeeper/web/`. Tests and synthetic fixtures are under `tests/`, and systemd units and configuration examples are under `deploy/`.

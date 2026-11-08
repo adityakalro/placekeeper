@@ -13,7 +13,8 @@ import httpx
 from placekeeper.plugins.kindle.catalog import AmazonCatalog
 from placekeeper.plugins.kindle.onboarding import Onboarder
 from placekeeper.plugins.kindle.store_mapping import StoreDeliveryDenied
-from placekeeper.sync.dry_run import load_profile, private_json
+from placekeeper.plugins.kindle.profiles import load_profile
+from placekeeper.storage import private_json
 from placekeeper.mapping.text import epub_index
 
 DOC='AUTOMATICBOOK0001'

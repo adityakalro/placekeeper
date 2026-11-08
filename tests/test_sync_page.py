@@ -11,7 +11,7 @@ from unittest.mock import patch,Mock
 import httpx
 
 from placekeeper.web.app import Jobs,handler_for
-from placekeeper.sync.dry_run import private_json
+from placekeeper.storage import private_json
 
 
 class PageTests(unittest.TestCase):

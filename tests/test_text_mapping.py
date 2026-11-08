@@ -70,5 +70,23 @@ class MappingTests(unittest.TestCase):
                 m.from_xpointer('/body/DocFragment[9]/body/p[1]/text()[1].0')
 
 
+class PrivateBookTests(unittest.TestCase):
+    def test_confirmed_book_handoffs_in_both_directions(self):
+        import os
+        from placekeeper.plugins.kindle.profiles import load_profile
+
+        path = os.environ.get('PLACEKEEPER_TEST_PROFILE')
+        if not path or not Path(path).is_file():
+            self.skipTest('Optional private validation profile is not configured')
+        profile, mapper, _ = load_profile(path)
+        verified = profile['physical_handoff_check']
+        anchor = verified['predicted']['xpointer']
+        position = verified['observed_successful_sidecar_write']
+        self.assertEqual(mapper.from_sidecar(position)['xpointer'], anchor)
+        first, last = mapper.from_xpointer(anchor)['sidecar_range']
+        self.assertLessEqual(first, position)
+        self.assertLessEqual(position, last)
+
+
 if __name__ == '__main__':
     unittest.main()

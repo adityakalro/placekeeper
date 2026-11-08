@@ -23,13 +23,6 @@ def private_json(path, data):
         Path(temporary).unlink(missing_ok=True)
 
 
-def append_event(path, data):
-    path = Path(path)
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600), 'a') as f:
-        f.write(json.dumps(data, separators=(',', ':'))+'\n')
-
-
 def digest(data):
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 

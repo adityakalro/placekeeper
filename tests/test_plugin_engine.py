@@ -14,11 +14,13 @@ import httpx
 from placekeeper import plugins
 from placekeeper.errors import MissingProgress, ReadFailure
 from placekeeper.plugins.contracts import Book, Observation, Plugin
+from placekeeper.plugins.kindle.legacy_catalog import legacy_state
 from placekeeper.plugins.libby.client import Libby
 from placekeeper.plugins.libby.reader import LibbyReader, open_reader as open_libby
 from placekeeper.plugins.registry import installed
 from placekeeper.sync.engine import execute
 from placekeeper.sync.job import run_books
+from placekeeper.sync.planner import choose_source
 from placekeeper.web.app import Jobs
 from tests import test_sync_page
 
@@ -190,6 +192,17 @@ class PluginEngineTests(unittest.TestCase):
         self.assertEqual(execute(readers, state, self.path)['status'], 'unconfirmed')
         self.assertEqual(execute(readers, state, self.path)['status'], 'error')
         reader.write.assert_called_once()
+
+    def test_old_receipt_is_suppressed_and_close_timestamps_fail_closed(self):
+        old = {'receipts': {'Libby': {'position': 30, 'stamp': 3000}}}
+        (self.root/'three-way-state.json').write_text(json.dumps(old))
+        observations = {'kindle': Observation(10, 10, 1000),
+                        'crosspoint': Observation(20, 20, 2990),
+                        'libby': Observation(30, 30, 3000)}
+        self.assertEqual(choose_source(observations, legacy_state(self.root)['receipts'], True),
+                         'crosspoint')
+        with self.assertRaisesRegex(ReadFailure, 'timestamps are too close'):
+            choose_source(observations, {}, True)
 
     def test_recent_policy_can_choose_a_reader_behind_another(self):
         text = Reader(200, 100)
