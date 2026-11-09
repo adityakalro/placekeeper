@@ -8,11 +8,11 @@ import httpx
 
 from placekeeper.plugins.contracts import Observation
 from placekeeper.plugins.transport import check_write, json_reader
-from .progress import fetch_progress_time, kindle_position, read_sidecar, write_position
+from .progress import kindle_position, read_sidecar, write_position
 
 
 class KindleReader:
-    prefer_recent = False
+    parallel_reads = True
 
     def __init__(self, client, auth, document, mapper, kind="PDOC"):
         self.client, self.auth, self.document, self.mapper = client, auth, document, mapper
@@ -29,10 +29,7 @@ class KindleReader:
             return Observation(position, anchor, receipt['stamp'], own=True)
         if pending and pending['target'] == position:
             return Observation(position, anchor, pending['stamp'], own=True)
-        stamp = None
-        if hint['need_timestamp']:
-            stamp = fetch_progress_time(self, {'document': self.document, 'kind': self.kind}, self.sidecar, position).timestamp()
-        return Observation(position, anchor, stamp, 60)
+        return Observation(position, anchor)
 
     def bucket(self, anchor):
         return self.mapper.from_xpointer(self.mapper.epub.coordinates[anchor])['sidecar_range']

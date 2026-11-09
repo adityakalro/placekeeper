@@ -59,7 +59,7 @@ Once Setup says **Ready to sync**, return to the **Sync** page. The credentials 
 3. In Placekeeper, click **Find new books** to discover the book and build its map. A long book can take a minute or more on a small Pi. When discovery finishes, click **Sync now** to transfer progress. Each job shows its own result.
 4. On the destination, use **Sync Progress** on X4, **Sync to Furthest Page Read** on Kindle, or **Shelf → Actions → Synchronize Shelf** in Libby. Open the book or audiobook to pick up the saved position.
 
-For future handoffs, sync the device you were using before clicking **Sync now**. Books with matching Libby loans use the newest saved progress timestamp. Books with Kindle and X4 progress alone move forward. Kindle keeps its furthest-read marker. In **Setup**, you can enable automatic progress sync every 30 minutes. It starts off disabled, and the Sync page shows whether it is on. Both **Sync now** and the schedule use existing maps. Use **Find new books** when you add a title.
+For future handoffs, sync the device you were using before clicking **Sync now**. Placekeeper compares mapped reading and listening positions and moves readers forward to the furthest position. It suppresses echoes from its own earlier writes. In **Setup**, you can enable automatic progress sync every 30 minutes. It starts off disabled, and the Sync page shows whether it is on. Both **Sync now** and the schedule use existing maps. Use **Find new books** when you add a title.
 
 ## How Find new books selects titles
 
@@ -75,10 +75,12 @@ If a connected service returns a connection or authentication error, Placekeeper
 
 ## If a book does not sync
 
+An interrupted write may need a check on the destination. Run `.venv/bin/python -m placekeeper.sync.recovery` on the host using the Placekeeper service account and data directory. If the target landed, run **Sync now** to verify it. If the destination has settled and the write did not land, use `--clear JOURNAL_ID` and run **Sync now**. Placekeeper rechecks the readers before resuming a partial handoff.
+
+
 - **Waiting for an EPUB in Readest:** Confirm the matching edition is in Readest Cloud and the Kindle copy is in your Send to Kindle library.
 - **Missing X4 progress:** Check the filename and matching mode, then open the book on the X4 and select **Sync Progress**.
 - **Libby title or chapters could not be matched:** Check that the active loan is the same book and author. Audio sync needs a compatible chapter sequence.
-- **Reader timestamps are too close:** Sync the device you want to use as the source, then retry. Kindle’s reported time has minute precision.
 - **Connection failed:** Check **Setup**, your network, and your device’s cloud sync. The providers’ unofficial endpoints may change.
 
 ## Onboarding and maps

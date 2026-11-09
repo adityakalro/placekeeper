@@ -1,5 +1,6 @@
 """Find shared titles in Libby, on the X4, and in the Kindle library."""
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from hashlib import md5
 import json
@@ -47,37 +48,41 @@ def loan_authors(loan):
             *(creator.get('name') for creator in loan.get('creators', []) if isinstance(creator, dict))]
 
 
-def x4_loans(root, source):
+def active_loans(root):
     with closing(Libby(root/'libby-device.json')) as libby:
-        loans = libby.audiobook_loans()
+        return libby.audiobook_loans()
+
+
+def x4_loans(root, books, loans):
     if not loans:
-        return [], None
-    books = source.books()
+        return []
     credentials = json.loads((root/'crosspoint-auth.json').read_text())
     headers = {'x-auth-user': credentials['username'], 'x-auth-key': credentials['auth_key']}
-    selected = {}
+    candidates = {}
     index = MetadataIndex(books, lambda book: [book.get('author')])
     title_counts = Counter(book['title'] for book in books)
-    with httpx.Client(timeout=20, follow_redirects=False) as client:
+    for loan in loans:
+        possible = index.find(loan.get('title'), loan_authors(loan))
+        if len(possible) != 1:
+            continue
+        book = possible[0]
+        if title_counts[book['title']] == 1:
+            candidates[book['id']] = book
+
+    with httpx.Client(timeout=20, follow_redirects=False) as client, ThreadPoolExecutor(max_workers=3) as pool:
         get = json_reader(client, missing_status=404)
-        for loan in loans:
-            possible = index.find(loan.get('title'), loan_authors(loan))
-            if len(possible) != 1:
-                continue
-            book = possible[0]
+
+        def has_progress(book):
             filename = book['title'] + '.epub'
-            if title_counts[book['title']] != 1:
-                continue
-            if book['id'] in selected:
-                continue
             document = md5(filename.encode()).hexdigest()
             try:
                 progress = read_progress(get, headers, document)
             except MissingProgress:
-                continue
-            if progress.get('document') == document and progress.get('progress'):
-                selected[book['id']] = book
-    return list(selected.values()), books
+                return False
+            return progress.get('document') == document and bool(progress.get('progress'))
+
+        return [book for book, found in zip(candidates.values(), pool.map(has_progress, candidates.values()))
+                if found]
 
 
 def kindle_matches(x4_books, documents):

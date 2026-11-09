@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
@@ -22,9 +23,10 @@ import httpx
 
 from placekeeper.plugins.kindle.catalog import AmazonCatalog
 from placekeeper.plugins.kindle.delivery import download_kfx, probe
-from placekeeper.plugins.kindle.loan_discovery import MetadataIndex, kindle_matches, x4_loans
+from placekeeper.plugins.kindle.loan_discovery import MetadataIndex, active_loans, kindle_matches, x4_loans
 from placekeeper.plugins.kindle.store_mapping import StoreDeliveryDenied, StoreMapper, extract_chapters
 from placekeeper.plugins.readest.client import ReadestSource
+from placekeeper.errors import ReadFailure
 from placekeeper.storage import ROOT, digest, private_json, state_lock
 from placekeeper.mapping.text import Mapper, epub_index, kfx_index
 
@@ -219,11 +221,20 @@ class Onboarder:
             if self.state_path.exists():
                 self.state=json.loads(self.state_path.read_text())
             # Do not commit a partial Amazon cursor or an incomplete EPUB list.
-            x4_books,books=x4_loans(loan_root,self.source) if loan_root is not None else ([],None)
+            x4_books = []
+            loan_check_failed = False
+            if loan_root is None:
+                books = self.source.books()
+            else:
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    loans = pool.submit(active_loans, loan_root)
+                    books = self.source.books()
+                    try:
+                        x4_books = x4_loans(loan_root, books, loans.result())
+                    except (ReadFailure, httpx.HTTPError, OSError, ValueError, KeyError, TypeError):
+                        loan_check_failed = True
             previous = self.state.get('amazon', {})
             amazon=self.catalog.pull(previous)
-            if books is None:
-                books=self.source.books()
             documents=amazon['documents']
             selected=kindle_matches(x4_books,documents)
             ordered_books = sorted(books, key=lambda book: book['id'])
@@ -315,6 +326,7 @@ class Onboarder:
                     'amazon_pages':amazon['pages'],
                     'readest_books':len(books)}
             if loan_root is not None:
+                report['loan_check_failed'] = loan_check_failed
                 statuses={event['document']:event['status'] for event in events}
                 report['matches']=[
                     {'title':book['title'],'kind':documents[doc].get('kind','PDOC'),

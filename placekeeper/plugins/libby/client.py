@@ -179,6 +179,9 @@ class Libby:
                 raise ReadFailure('Could not open the Libby audiobook session.')
             timing = extract_timing(response.text, parsed.hostname)
             return player, url, timing
+        except httpx.HTTPError:
+            player.close()
+            raise ReadFailure('Could not reach the Libby audiobook player.') from None
         except Exception:
             player.close()
             raise

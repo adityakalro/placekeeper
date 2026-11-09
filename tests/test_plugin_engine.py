@@ -6,13 +6,14 @@ from pathlib import Path
 import re
 import sys
 import tempfile
+from threading import Barrier
 import unittest
 from unittest.mock import Mock, patch
 
 import httpx
 
 from placekeeper import plugins
-from placekeeper.errors import MissingProgress, ReadFailure
+from placekeeper.errors import MissingProgress, ReadFailure, UnsupportedMapping
 from placekeeper.plugins.contracts import Book, Observation, Plugin
 from placekeeper.plugins.kindle.legacy_catalog import legacy_state
 from placekeeper.plugins.libby.client import Libby
@@ -21,6 +22,8 @@ from placekeeper.plugins.registry import installed
 from placekeeper.sync.engine import execute
 from placekeeper.sync.job import run_books
 from placekeeper.sync.planner import choose_source
+from placekeeper.sync.recovery import main as recovery
+from placekeeper.storage import state_lock
 from placekeeper.web.app import Jobs
 from tests import test_sync_page
 
@@ -68,10 +71,9 @@ PLUGIN = Plugin('fourth', 'Fourth Reader', (FILE,),
 
 
 class Reader:
-    def __init__(self, position, stamp=None, recent=False):
+    def __init__(self, position, stamp=None):
         self.position = position
         self.stamp = stamp
-        self.prefer_recent = recent
         self.writes = []
 
     def read(self, hint):
@@ -162,10 +164,9 @@ class PluginEngineTests(unittest.TestCase):
         for missing, partner in [('crosspoint', 'libby'), ('libby', 'crosspoint')]:
             with self.subTest(missing=missing):
                 kindle = Reader(10, 100)
-                other = Reader(100, 300, recent=(partner == 'libby'))
+                other = Reader(100, 300)
                 absent = Mock()
                 absent.read.side_effect = MissingProgress('No saved position')
-                absent.prefer_recent = False
                 result = execute({'kindle': kindle, partner: other, missing: absent},
                                  {'receipts': {}}, self.path)
                 self.assertEqual(result['status'], 'synced')
@@ -193,23 +194,78 @@ class PluginEngineTests(unittest.TestCase):
         self.assertEqual(execute(readers, state, self.path)['status'], 'error')
         reader.write.assert_called_once()
 
-    def test_old_receipt_is_suppressed_and_close_timestamps_fail_closed(self):
+    def test_recovery_resumes_partial_handoff_from_original_source(self):
+        class Rounded(Reader):
+            def read(self, hint):
+                rounded = self.position == 200
+                return Observation(self.position, self.position + int(rounded), own=rounded)
+
+        destination = Reader(50)
+        readers = {'kindle': Reader(200), 'x4': Rounded(100), 'libby': destination}
+        with patch.object(destination, 'write', side_effect=OSError('write interrupted')):
+            path = self.root/'progress'/('a'*64 + '.json')
+            result = execute(readers, {'receipts': {}}, path)
+            self.assertEqual(result['outcomes'], {'x4': 'verified'})
+            self.assertEqual(result['status'], 'unconfirmed')
+            self.assertEqual(execute(readers, json.loads(path.read_text()), path)['writes'], 0)
+        with patch.object(sys, 'argv', ['recovery', '--data-root', str(self.root), '--clear', path.stem]), \
+                patch('builtins.print'):
+            recovery()
+        result = execute(readers, json.loads(path.read_text()), path)
+        self.assertEqual(result['source'], 'kindle')
+        self.assertEqual(result['outcomes'], {'x4': 'kept', 'libby': 'verified'})
+        self.assertEqual(destination.writes, [200])
+        self.assertNotIn('handoff', json.loads(path.read_text()))
+
+    def test_parallel_reads_overlap_before_preview_returns(self):
+        barrier = Barrier(3)
+
+        class Concurrent(Reader):
+            parallel_reads = True
+
+            def read(self, hint):
+                barrier.wait(timeout=2)
+                return super().read(hint)
+
+        readers = {'kindle': Concurrent(300), 'crosspoint': Concurrent(100), 'libby': Concurrent(200)}
+        result = execute(readers, {'receipts': {}}, self.path, dry_run=True)
+        self.assertEqual(result['targets'], {'crosspoint': 300, 'libby': 300})
+        self.assertTrue(all(not reader.writes for reader in readers.values()))
+
+    def test_unsupported_audio_mapping_allows_ebook_sync(self):
+        kindle, x4, audio = Reader(200), Reader(100), Reader(300)
+        with patch.object(audio, 'read', side_effect=UnsupportedMapping('Audio chapter is unmapped.')):
+            result = execute({'kindle': kindle, 'x4': x4, 'libby': audio},
+                             {'receipts': {}}, self.path)
+        self.assertEqual(result['outcomes'], {'x4': 'verified'})
+        self.assertEqual(result['skipped_readers'], {'libby': 'Audio chapter is unmapped.'})
+        self.assertEqual(x4.writes, [200])
+        self.assertEqual(audio.writes, [])
+
+    def test_sync_uses_the_discovery_watcher_lock(self):
+        directory = self.root/'onboarding'
+        directory.mkdir()
+        with state_lock(directory/'state.json'):
+            with self.assertRaisesRegex(ValueError, 'Another loop'):
+                run_books(self.root, {}, lambda _: None, dry_run=True)
+
+    def test_own_furthest_position_is_not_echoed(self):
         old = {'receipts': {'Libby': {'position': 30, 'stamp': 3000}}}
         (self.root/'three-way-state.json').write_text(json.dumps(old))
-        observations = {'kindle': Observation(10, 10, 1000),
+        observations = {'kindle': Observation(10, 10),
                         'crosspoint': Observation(20, 20, 2990),
                         'libby': Observation(30, 30, 3000)}
-        self.assertEqual(choose_source(observations, legacy_state(self.root)['receipts'], True),
-                         'crosspoint')
-        with self.assertRaisesRegex(ReadFailure, 'timestamps are too close'):
-            choose_source(observations, {}, True)
+        self.assertIsNone(choose_source(observations, legacy_state(self.root)['receipts']))
+        self.assertEqual(choose_source(observations, {}), 'libby')
 
-    def test_recent_policy_can_choose_a_reader_behind_another(self):
-        text = Reader(200, 100)
-        audio = Reader(100, 300, recent=True)
-        result = execute({'text': text, 'audio': audio}, {'receipts': {}}, self.path)
-        self.assertEqual(result['source'], 'audio')
-        self.assertEqual(text.writes, [100])
+    def test_furthest_reader_wins_without_timestamp_and_updates_only_lagging_readers(self):
+        kindle, x4, audio = Reader(200), Reader(160, 100), Reader(100, 300)
+        result = execute({'kindle': kindle, 'crosspoint': x4, 'libby': audio},
+                         {'receipts': {}}, self.path)
+        self.assertEqual(result['source'], 'kindle')
+        self.assertEqual(kindle.writes, [])
+        self.assertEqual(x4.writes, [200])
+        self.assertEqual(audio.writes, [200])
 
     def test_source_change_during_write_stops_remaining_destinations(self):
         first, second, source = Reader(10), Reader(20), Reader(100)

@@ -71,26 +71,23 @@ class ProgressClientTests(unittest.TestCase):
                 read_sidecar(json_reader(client), None, 'book')
         self.assertEqual(requests, ['GET', 'GET'])
 
-    def test_pending_kindle_write_verifies_without_fetching_amazon_time(self):
+    def test_kindle_store_position_works_without_timestamp_and_recognizes_pending_write(self):
         mapper = Mock()
         mapper.from_sidecar.return_value = {'xpointer': P1}
         mapper.epub.coordinates.at_or_after.return_value = 1
-        reader = KindleReader(Mock(), None, 'book', mapper)
-        sidecar = {'payload': {'key': 'book', 'type': 'PDOC',
+        reader = KindleReader(Mock(), None, 'book', mapper, 'EBOK')
+        sidecar = {'payload': {'key': 'book', 'type': 'EBOK',
                                'records': [{'type': 'kindle.lpr', 'location': 449}]}}
-        with patch('placekeeper.plugins.kindle.reader.read_sidecar', return_value=sidecar), \
-                patch('placekeeper.plugins.kindle.reader.fetch_progress_time') as fetch:
-            hint = {'need_timestamp': True, 'receipt': None, 'pending': {'target': 449, 'stamp': 5000}}
+        with patch('placekeeper.plugins.kindle.reader.read_sidecar', return_value=sidecar):
+            hint = {'need_timestamp': False, 'receipt': None, 'pending': {'target': 449, 'stamp': 5000}}
             result = reader.read(hint)
             self.assertTrue(result.own)
             self.assertEqual(result.stamp, 5000)
-            fetch.assert_not_called()
             sidecar['payload']['records'][0]['location'] = 600
-            fetch.return_value.timestamp.return_value = 6000
             result = reader.read(hint)
             self.assertFalse(result.own)
-            self.assertEqual(result.stamp, 6000)
-            fetch.assert_called_once()
+            self.assertEqual(result.native, 600)
+            self.assertIsNone(result.stamp)
 
     def test_kindle_write_only_updates_last_read(self):
         def respond(request):

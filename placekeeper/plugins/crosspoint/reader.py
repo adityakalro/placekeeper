@@ -5,7 +5,7 @@ import json
 
 import httpx
 
-from placekeeper.errors import MissingProgress, ReadFailure
+from placekeeper.errors import MissingProgress
 from placekeeper.mapping.text import epub_index, epub_position_details
 from placekeeper.plugins.contracts import Observation
 from placekeeper.plugins.transport import check_write, json_reader
@@ -13,7 +13,7 @@ from .client import crosspoint_progress, is_own_progress, read_progress, write_p
 
 
 class CrossPointReader:
-    prefer_recent = False
+    parallel_reads = True
 
     def __init__(self, client, headers, document, epub, coordinates):
         self.client, self.headers, self.document = client, headers, document
@@ -29,8 +29,6 @@ class CrossPointReader:
         if type(stamp) in (int, float) and stamp >= 100_000_000_000:
             stamp /= 1000
         if type(stamp) not in (int, float) or stamp <= 0:
-            if hint['need_timestamp']:
-                raise ReadFailure('X4 returned no valid progress timestamp.')
             stamp = None
         own = is_own_progress(data.get('device_id'), data.get('device'))
         return Observation(native, self.coordinates.at_or_after(native), stamp, own=own)

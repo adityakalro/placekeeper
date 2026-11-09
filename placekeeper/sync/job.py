@@ -4,6 +4,7 @@ from contextlib import ExitStack
 from dataclasses import replace
 
 from placekeeper.errors import ReadFailure
+from placekeeper.storage import onboarding_lock
 from placekeeper.sync.engine import sync_book
 
 
@@ -24,7 +25,7 @@ def refresh_libraries(root, plugins):
 
 
 def run_books(root, plugins, notify, *, dry_run=False):
-    with ExitStack() as stack:
+    with onboarding_lock(root), ExitStack() as stack:
         readers = {
             key: replace(plugin, reader=stack.enter_context(plugin.reader_session(root)))
             if plugin.reader_session is not None else plugin

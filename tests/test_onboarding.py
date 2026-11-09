@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import shutil
 import tempfile
+from threading import Barrier
 import unittest
 from unittest.mock import Mock, patch
 from zipfile import ZipFile
@@ -16,6 +17,7 @@ from placekeeper.plugins.kindle.store_mapping import StoreDeliveryDenied
 from placekeeper.plugins.kindle.profiles import load_profile
 from placekeeper.storage import private_json
 from placekeeper.mapping.text import epub_index
+from placekeeper.errors import ReadFailure
 
 DOC='AUTOMATICBOOK0001'
 TITLE='Placekeeper Progress Test'
@@ -81,13 +83,22 @@ class OnboardingTests(unittest.TestCase):
                 'document':asin,'kind':'EBOK','title':title,'authors':['Author, An'],
             }
         order = []
+        catalogs = Barrier(2)
+        x4_requests = Barrier(3)
         libby = Mock()
-        libby.audiobook_loans.side_effect = lambda: order.append('libby') or [
-            {'title':title,'firstCreatorName':author}
-            for title, author in [(store_title,'An Author'), (TITLE,'Placekeeper'), (missing_title,'An Author')]
-        ]
+        def loans():
+            order.append('libby')
+            catalogs.wait(timeout=3)
+            return [{'title':title,'firstCreatorName':author}
+                    for title, author in [(store_title,'An Author'), (TITLE,'Placekeeper'),
+                                          (missing_title,'An Author')]]
+        libby.audiobook_loans.side_effect = loans
+        def readest():
+            catalogs.wait(timeout=3)
+            return list(self.source.items)
         def crosspoint(request):
             order.append('x4')
+            x4_requests.wait(timeout=3)
             self.assertEqual(request.method, 'GET')
             document = request.url.path.rsplit('/', 1)[1]
             if document == md5((missing_title + '.epub').encode()).hexdigest():
@@ -100,6 +111,7 @@ class OnboardingTests(unittest.TestCase):
         client = httpx.Client(transport=httpx.MockTransport(crosspoint))
         with patch('placekeeper.plugins.kindle.loan_discovery.Libby',return_value=libby), \
                 patch('placekeeper.plugins.kindle.loan_discovery.httpx.Client',return_value=client), \
+                patch.object(self.source,'books',side_effect=readest), \
                 patch.object(self.catalog,'pull',side_effect=kindle), \
                 patch('placekeeper.plugins.kindle.onboarding.extract_chapters',side_effect=ValueError('Unsupported voucher')):
             report = self.engine().run_once(self.root)
@@ -111,6 +123,15 @@ class OnboardingTests(unittest.TestCase):
         self.assertEqual(self.downloads,1)
         registry=json.loads((self.root/'ready-profiles.json').read_text())
         self.assertEqual([entry['document'] for entry in registry['profiles']],[DOC])
+
+    def test_libby_outage_does_not_prevent_kindle_readest_discovery(self):
+        with patch('placekeeper.plugins.kindle.onboarding.active_loans',
+                   side_effect=ReadFailure('Libby temporarily unavailable')):
+            report = self.engine().run_once(self.root)
+        self.assertTrue(report['loan_check_failed'])
+        self.assertEqual(report['events'], [{'document': DOC, 'status': 'ready'}])
+        registry = json.loads((self.root/'ready-profiles.json').read_text())
+        self.assertEqual([entry['document'] for entry in registry['profiles']], [DOC])
 
     def test_no_active_loans_still_builds_maps_for_two_reader_sync(self):
         engine=self.engine()

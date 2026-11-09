@@ -61,7 +61,8 @@ function render(s){
       ? matches.length+' titles matched across Libby, X4, and Kindle · '+((counts.ready||0)+(counts.cached||0))+' verified maps available for progress sync'
       : (counts.ready||0)+' new maps · '+(counts.waiting_for_epub||0)+' waiting for a matching ebook')
       +(counts.discovery_error?' · '+counts.discovery_error+' catalog refresh failed':'');
-    $('discoveryResult').textContent=summary+(discovery.finished_at?' · '+new Date(discovery.finished_at).toLocaleString():'');
+    const loanStatus=counts.loan_check_failed?' · Could not finish checking Libby and X4 matches':'';
+    $('discoveryResult').textContent=summary+loanStatus+(discovery.finished_at?' · '+new Date(discovery.finished_at).toLocaleString():'');
     const list=$('discoveryMatches');
     list.replaceChildren();
     list.hidden=!matches?.length;

@@ -6,3 +6,7 @@ class ReadFailure(Exception):
 
 class MissingProgress(ReadFailure):
     """A service confirmed the book has no saved progress marker."""
+
+
+class UnsupportedMapping(ReadFailure):
+    """A verified service position cannot be mapped for this edition."""

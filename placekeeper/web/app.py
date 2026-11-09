@@ -16,7 +16,7 @@ import httpx
 from placekeeper.sync.job import refresh_libraries, run_books
 from placekeeper.web.setup import Connections
 from placekeeper.errors import ReadFailure
-from placekeeper.storage import ROOT, private_json, state_lock
+from placekeeper.storage import ROOT, onboarding_lock, private_json, state_lock
 
 
 PROGRESS_INTERVAL = 30 * 60
@@ -106,7 +106,8 @@ class Jobs:
         if not self.lock.acquire(blocking=False):
             raise ValueError('Wait for the current sync or setup action to finish.')
         try:
-            return self.connections.apply(service,action,data)
+            with onboarding_lock(self.root):
+                return self.connections.apply(service,action,data)
         finally:
             self.lock.release()
 
@@ -136,7 +137,7 @@ class Jobs:
                 if discovery:
                     counts=self.onboard()
                     result={'discovery':counts}
-                    failed=bool(counts.get('discovery_error'))
+                    failed=bool(counts.get('discovery_error') or counts.get('loan_check_failed'))
                 else:
                     books=self.sync(lambda text:setattr(self,'phase',text))
                     result={'books':books}

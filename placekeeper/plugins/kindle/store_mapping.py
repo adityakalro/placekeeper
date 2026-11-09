@@ -1,5 +1,6 @@
 """Extract chapter positions from an entitled Kindle Store delivery."""
 from bisect import bisect_right
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
@@ -65,8 +66,11 @@ def delivery(document, auth_path):
             resources[kind] = matches[0]
         voucher = fetch_resource(client, resources['DRM_VOUCHER']['endpoint']['url'], auth=auth,
                                  headers={**headers, 'Accept': 'application/x-com.amazon.drm.Voucher@1.0'})
-        return serial, voucher, *(fetch_resource(client, resources[k]['optimalEndpoint']['directUrl'])
-                                  for k in ('KINDLE_MAIN_BASE', 'KINDLE_MAIN_METADATA'))
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            base = pool.submit(fetch_resource, client, resources['KINDLE_MAIN_BASE']['optimalEndpoint']['directUrl'])
+            metadata = fetch_resource(client, resources['KINDLE_MAIN_METADATA']['optimalEndpoint']['directUrl'])
+            return serial, voucher, base.result(), metadata
+
 
 
 def extract_chapters(document, auth_path, parser_path):

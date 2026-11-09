@@ -28,6 +28,8 @@ def discover(root, connected):
         raise ReadFailure('Could not refresh Kindle and Readest book matches.')
     report = json.loads((root/'onboarding/last-run.json').read_text())
     counts = dict(Counter(event['status'] for event in report['events']))
+    if report.get('loan_check_failed'):
+        counts['loan_check_failed'] = 1
     if 'matches' in report:
         counts['matches'] = report['matches']
     return counts

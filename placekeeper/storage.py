@@ -41,3 +41,9 @@ def state_lock(path):
         yield
     finally:
         os.close(fd)
+
+
+def onboarding_lock(data_root):
+    directory = Path(data_root) / 'onboarding'
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return state_lock(directory / 'state.json')

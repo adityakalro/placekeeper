@@ -1,7 +1,7 @@
 """Libby progress and chapter alignment against a verified edition."""
 from contextlib import ExitStack, closing, contextmanager
 
-from placekeeper.errors import MissingProgress, ReadFailure
+from placekeeper.errors import MissingProgress, UnsupportedMapping
 from placekeeper.mapping.chapters import ChapterMap
 from placekeeper.mapping.text import epub_index
 from placekeeper.plugins.contracts import Observation
@@ -11,7 +11,7 @@ AUDIO_TOLERANCE_MS = 60_000
 
 
 class LibbyReader:
-    prefer_recent = True
+    parallel_reads = True
 
     def __init__(self, libby, loan, player, url, timing, chapters, coordinates, marker):
         self.libby, self.loan, self.player, self.url = libby, loan, player, url
@@ -22,17 +22,23 @@ class LibbyReader:
         marker = self.initial if self.initial is not None else self.libby.position(self.loan)
         self.initial = None
         native = elapsed(self.timing, marker)
-        coordinate, _ = self.chapters.to_text(native)
+        try:
+            coordinate, _ = self.chapters.to_text(native)
+        except ValueError:
+            raise UnsupportedMapping('Libby is outside the mapped chapters.') from None
         stamp = marker.get('timestamp')
         if type(stamp) not in (int, float) or stamp <= 0:
-            raise ReadFailure('Libby returned no valid progress timestamp.')
-        if stamp >= 100_000_000_000:
+            stamp = None
+        elif stamp >= 100_000_000_000:
             stamp /= 1000
         return Observation(native, self.coordinates.at_or_after(coordinate), stamp,
                            own=marker.get('deviceId') == self.libby.state.get('chipId'))
 
     def target(self, anchor, current):
-        target, _ = self.chapters.to_audio(self.coordinates[anchor])
+        try:
+            target, _ = self.chapters.to_audio(self.coordinates[anchor])
+        except ValueError:
+            raise UnsupportedMapping('The selected position is outside Libby’s mapped chapters.') from None
         return target if abs(target - current.native) > AUDIO_TOLERANCE_MS else None
 
     def equivalent(self, first, second):
@@ -72,7 +78,10 @@ def reader_session(root):
             player, url, timing = libby.open_player(loan)
             with closing(player):
                 coordinates = book.mapper.epub.coordinates if book.mapper else epub_index(book.epub).coordinates
-                chapters = ChapterMap(book.epub, coordinates, timing)
+                try:
+                    chapters = ChapterMap(book.epub, coordinates, timing)
+                except ValueError:
+                    raise UnsupportedMapping('Libby and the ebook could not be aligned by chapter.') from None
                 yield LibbyReader(libby, loan, player, url, timing, chapters, coordinates, marker)
 
         yield open_book
