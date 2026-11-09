@@ -3,14 +3,14 @@ import argparse
 import json
 from pathlib import Path
 
-from placekeeper.storage import ROOT, state_lock
+from placekeeper.storage import default_data_root, state_lock
 from placekeeper.sync.job import run_books
 from placekeeper.plugins.registry import installed
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--data-root', type=Path, default=ROOT/'.private')
+    parser.add_argument('--data-root', type=Path, default=default_data_root())
     root = parser.parse_args().data_root.resolve()
     if not root.exists():
         print('[]')

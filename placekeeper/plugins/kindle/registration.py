@@ -17,11 +17,11 @@ import httpx
 from audible import Authenticator
 from audible.login import create_code_verifier, create_s256_code_challenge
 
-from placekeeper.storage import ROOT, private_json
+from placekeeper.storage import default_data_root, private_json
 
 
-DESTINATION = ROOT/'.private/amazon-kindle-download-device.json'
-PLAN = ROOT/'.private/kindle-download-device-plan.json'
+DESTINATION = default_data_root()/'amazon-kindle-download-device.json'
+PLAN = default_data_root()/'kindle-download-device-plan.json'
 
 
 def plan():
@@ -35,7 +35,7 @@ def plan():
 
 def register(prepared, access_token=None, authorization=None, destination=None, data_root=None):
     destination = Path(destination) if destination is not None else DESTINATION
-    data_root = Path(data_root) if data_root is not None else ROOT/'.private'
+    data_root = Path(data_root) if data_root is not None else default_data_root()
     if (prepared['registration_endpoint'] != 'https://api.amazon.com/auth/register'
             or prepared['device_type'] != 'AGZZ1ST63LKBW'
             or prepared['device_name'] not in ('Placekeeper', 'Book Sync Pi Download Test')

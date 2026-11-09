@@ -15,22 +15,11 @@ if command -v termux-info >/dev/null && command -v pkg >/dev/null; then
     requirements=requirements.txt
 elif [[ "$(uname -s)" == Linux ]]; then
     echo 'Installing Placekeeper for Linux.'
-    if command -v apt-get >/dev/null; then
-        apt=(apt-get)
-        if (( EUID != 0 )); then
-            if ! command -v sudo >/dev/null; then
-                echo 'Install git, python3, and python3-venv as an administrator, then rerun.' >&2
-                apt=()
-            else
-                apt=(sudo apt-get)
-            fi
-        fi
-        if (( ${#apt[@]} )); then
-            if ! dpkg-query -W -f='${Status}\n' git python3 python3-venv 2>/dev/null |
-                awk '$0 == "install ok installed" { count++ } END { exit (count != 3) }'; then
-                "${apt[@]}" update
-                "${apt[@]}" install -y git python3 python3-venv
-            fi
+    if (( EUID == 0 )) && command -v apt-get >/dev/null; then
+        if ! dpkg-query -W -f='${Status}\n' git python3 python3-venv 2>/dev/null |
+            awk '$0 == "install ok installed" { count++ } END { exit (count != 3) }'; then
+            apt-get update
+            apt-get install -y git python3 python3-venv
         fi
     fi
 else
@@ -56,12 +45,13 @@ fi
 
 (
     umask 077
-    mkdir -p .private/vendor
-    if [[ ! -e .private/web-config.json && ! -L .private/web-config.json ]]; then
-        (set -o noclobber; cat deploy/web-config.example.json > .private/web-config.json)
+    data_dir=$(.venv/bin/python -c 'from placekeeper.storage import default_data_root; print(default_data_root())')
+    mkdir -p "$data_dir/vendor"
+    if [[ ! -e "$data_dir/web-config.json" && ! -L "$data_dir/web-config.json" ]]; then
+        (set -o noclobber; cat deploy/web-config.example.json > "$data_dir/web-config.json")
     fi
 
-    parser=.private/vendor/kindle.koplugin
+    parser="$data_dir/vendor/kindle.koplugin"
     revision=501488fd99ace3ea143a8693b9fa7c6421101d51
     if [[ ! -d "$parser/.git" ]]; then
         git init "$parser"
@@ -70,11 +60,11 @@ fi
         git -C "$parser" fetch --depth 1 https://github.com/kaikozlov/kindle.koplugin.git "$revision"
         git -C "$parser" checkout --detach "$revision"
     fi
-    if [[ ! -e .private/vendor/python && ! -L .private/vendor/python ]]; then
-        ln -s kindle.koplugin/python .private/vendor/python
+    if [[ ! -e "$data_dir/vendor/python" && ! -L "$data_dir/vendor/python" ]]; then
+        ln -s kindle.koplugin/python "$data_dir/vendor/python"
     fi
-    if [[ ! -d .private/vendor/python/kfxlib ]]; then
-        echo 'The KFX parser is missing from .private/vendor/python. Check the existing path and rerun.' >&2
+    if [[ ! -d "$data_dir/vendor/python/kfxlib" ]]; then
+        echo "The KFX parser is missing from $data_dir/vendor/python. Check the existing path and rerun." >&2
         exit 1
     fi
 )

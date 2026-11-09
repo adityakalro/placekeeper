@@ -27,7 +27,7 @@ from placekeeper.plugins.kindle.loan_discovery import MetadataIndex, active_loan
 from placekeeper.plugins.kindle.store_mapping import StoreDeliveryDenied, StoreMapper, extract_chapters
 from placekeeper.plugins.readest.client import ReadestSource
 from placekeeper.errors import ReadFailure
-from placekeeper.storage import ROOT, digest, private_json, state_lock
+from placekeeper.storage import ROOT, default_data_root, digest, private_json, state_lock
 from placekeeper.mapping.text import Mapper, epub_index, kfx_index
 
 VERSION = 1
@@ -339,10 +339,10 @@ class Onboarder:
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--root',type=Path,default=ROOT/'.private/onboarding')
-    p.add_argument('--amazon-auth',type=Path,default=ROOT/'.private/amazon-kindle-download-device.json')
-    p.add_argument('--readest-auth',type=Path,default=ROOT/'.private/readest-device.json')
-    p.add_argument('--kfxlib-parent',type=Path,default=ROOT/'.private/vendor/python')
+    p.add_argument('--root',type=Path,default=default_data_root()/'onboarding')
+    p.add_argument('--amazon-auth',type=Path,default=default_data_root()/'amazon-kindle-download-device.json')
+    p.add_argument('--readest-auth',type=Path,default=default_data_root()/'readest-device.json')
+    p.add_argument('--kfxlib-parent',type=Path,default=default_data_root()/'vendor/python')
     p.add_argument('--loan-root',type=Path,help='Discover from active Libby loans and saved X4 positions')
     p.add_argument('--watch',action='store_true')
     p.add_argument('--interval',type=int,default=300)

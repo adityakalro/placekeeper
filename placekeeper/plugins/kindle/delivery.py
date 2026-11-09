@@ -15,7 +15,7 @@ import xml.etree.ElementTree as ET
 import httpx
 from audible import Authenticator
 
-from placekeeper.storage import ROOT, private_json
+from placekeeper.storage import default_data_root, private_json
 
 
 def probe(document, auth_path, output):
@@ -143,8 +143,8 @@ if __name__ == '__main__':
     group = p.add_mutually_exclusive_group(required=True)
     group.add_argument('--document')
     group.add_argument('--list', action='store_true', help='Discover personal documents without downloading them')
-    p.add_argument('--auth', type=Path, default=ROOT/'.private/amazon-device.json')
-    p.add_argument('--output', type=Path, default=ROOT/'.private/delivery-probes')
+    p.add_argument('--auth', type=Path, default=default_data_root()/'amazon-device.json')
+    p.add_argument('--output', type=Path, default=default_data_root()/'delivery-probes')
     p.add_argument('--download', action='store_true', help='Download the manifest KFX resource if available')
     args = p.parse_args()
     if args.list:

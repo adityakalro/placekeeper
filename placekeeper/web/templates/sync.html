@@ -5,7 +5,15 @@
   <p class="muted"><span id="schedule">Checking automatic sync…</span> <a href="/setup">Manage in Setup</a></p>
   <p id="phase" role="status" aria-live="polite">Checking connection…</p>
 </section>
-<section class="card"><h2 id="resultTitle">Last progress sync</h2><div id="results"><p class="empty">No progress sync has run yet.</p></div><p class="meta" id="time"></p></section>
+<section class="card" aria-labelledby="resultTitle">
+  <h2 id="resultTitle">Last progress sync</h2>
+  <p class="empty" id="resultMessage">No progress sync has run yet.</p>
+  <table class="sync-results" aria-labelledby="resultTitle" id="resultsTable" hidden>
+    <thead><tr><th scope="col">Book</th><th scope="col">Services</th></tr></thead>
+    <tbody id="results"></tbody>
+  </table>
+  <p class="meta" id="time"></p>
+</section>
 <section class="card">
   <h2>Book discovery</h2>
   <p class="muted">Find and map new books so their progress can sync.</p>
@@ -31,26 +39,45 @@ function render(s){
   const last=s.last;
   if(last){
     $('resultTitle').textContent=last.status==='complete'?'Sync complete':last.status==='needs_attention'?'Some books need attention':'Sync did not finish';
+    const books=last.books||[];
+    const message=last.message||(last.books?.length===0?'No mapped books to sync. Use Find new books to look for matches.':'');
+    $('resultMessage').textContent=message;
+    $('resultMessage').hidden=!message;
+    $('resultMessage').classList.toggle('error',Boolean(last.message));
+    $('resultsTable').hidden=books.length===0;
     $('results').replaceChildren();
-    if(last.message){
-      const p=document.createElement('p');
-      p.textContent=last.message;
-      p.className='error';
-      $('results').append(p);
+    for(const book of books){
+      const row=$('results').insertRow();
+      const title=document.createElement('th');
+      title.scope='row';
+      title.textContent=book.title;
+      row.append(title);
+      const services=row.insertCell();
+      const checked=new Map();
+      if(book.source&&['synced','in_sync'].includes(book.status))checked.set(book.source,'Source');
+      for(const [id,outcome] of Object.entries(book.outcomes||{})){
+        if(outcome==='verified')checked.set(id,'Update verified');
+        if(outcome==='kept'&&['synced','in_sync'].includes(book.status))checked.set(id,'No update needed');
+      }
+      for(const [id,status] of checked){
+        const label=s.services?.[id]?.label||id;
+        const item=document.createElement('span');
+        item.className='sync-service';
+        item.textContent='✓ '+label;
+        item.title=status;
+        item.setAttribute('aria-label',label+'. '+status);
+        services.append(item);
+      }
+      const failed=['error','unconfirmed','changed'].includes(book.status);
+      if(failed||book.skipped_readers||checked.size===0){
+        const detail=document.createElement('div');
+        detail.className='sync-detail'+(failed?' error':'');
+        detail.textContent=!failed&&checked.size>0
+          ?Object.values(book.skipped_readers).join(' ')
+          :book.message;
+        services.append(detail);
+      }
     }
-    for(const b of last.books||[]){
-      const row=document.createElement('div');
-      row.className='row';
-      const title=document.createElement('div');
-      title.className='book';
-      title.textContent=b.title;
-      const detail=document.createElement('div');
-      detail.className='result'+(['error','unconfirmed','changed'].includes(b.status)?' error':'');
-      detail.textContent=b.message;
-      row.append(title,detail);
-      $('results').append(row);
-    }
-    if(last.books?.length===0)$('results').textContent='No mapped books to sync. Use Find new books to look for matches.';
     $('time').textContent=last.finished_at?'Finished '+new Date(last.finished_at).toLocaleString():'';
   }
   const discovery=s.last_discovery||(last?.discovery?last:null);

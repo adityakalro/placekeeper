@@ -16,7 +16,7 @@ import httpx
 from placekeeper.sync.job import refresh_libraries, run_books
 from placekeeper.web.setup import Connections
 from placekeeper.errors import ReadFailure
-from placekeeper.storage import ROOT, onboarding_lock, private_json, state_lock
+from placekeeper.storage import default_data_root, onboarding_lock, private_json, state_lock
 
 
 PROGRESS_INTERVAL = 30 * 60
@@ -227,11 +227,13 @@ def handler_for(jobs,hosts,networks):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--config',type=Path,default=ROOT/'.private/web-config.json')
-    p.add_argument('--data-root',type=Path,default=ROOT/'.private')
+    p.add_argument('--config', type=Path, help='Override the web configuration file')
+    p.add_argument('--data-root',type=Path,default=default_data_root())
     args=p.parse_args();os.umask(0o077)
-    config=json.loads(args.config.read_text())
-    jobs=Jobs(args.data_root.resolve())
+    data_root = args.data_root.expanduser().resolve()
+    config_path = args.config or data_root/'web-config.json'
+    config = json.loads(config_path.expanduser().read_text())
+    jobs=Jobs(data_root)
     handler=handler_for(jobs,set(config['hosts']),[ipaddress.ip_network(n) for n in config['networks']])
     server=ThreadingHTTPServer((config.get('bind','0.0.0.0'),int(config.get('port',8780))),handler)
     server.daemon_threads=True

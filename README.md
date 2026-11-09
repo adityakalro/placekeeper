@@ -12,15 +12,18 @@ Each installation uses one household’s accounts. The included Kindle catalog u
 
 ## 1. Install Placekeeper
 
-From a Linux or Termux shell, run:
+From a Linux or Termux shell, clone into your home directory and run the installer as your regular user:
 
 ```sh
+cd ~
 git clone https://github.com/adityakalro/placekeeper.git
 cd placekeeper
 bash install.sh
 ```
 
-The installer detects Termux or Linux, creates a virtual environment, installs the Python dependencies and pinned KFX parser, and creates a localhost web configuration. Rerunning it preserves existing account data and web settings. On Debian 13 and DietPi, it uses APT for missing system prerequisites. On other Linux distributions, install Git and Python 3.13 or newer with venv and pip through your package manager first. If you need Git to clone on Debian, run `sudo apt install git`. On Termux, run `pkg install git`.
+The installer creates a virtual environment in the checkout and stores configuration, credentials, and book maps in `~/.config/placekeeper/`. On Linux, Git and Python 3.13 or newer with venv and pip are prerequisites. If your distribution lacks them, ask an administrator to install them first. On Termux, install Git with `pkg install git`. The installer then uses Termux's package manager for the remaining prerequisites.
+
+Edit `~/.config/placekeeper/web-config.json` as your regular user to change the web port or allowed networks. Restart Placekeeper after editing it. Existing checkouts with a `.private` directory or symlink continue to use it. To choose a different data directory, set `PLACEKEEPER_DATA_DIR` before both installation and startup.
 
 ## 2. Start the private web page
 
@@ -38,7 +41,7 @@ Keep the tunnel open while using the same [local Setup address](http://127.0.0.1
 
 ### Run in the background and start at boot
 
-- **Linux and DietPi.** Install the included systemd service and run `sudo systemctl enable --now placekeeper-web.service` to start it now and at boot. See the [Linux service guide](docs/deployment.md#2-start-the-service-and-connect-accounts) for service installation and private network access.
+- **Linux and DietPi.** Run the command above as your regular user for a foreground session. For a system-wide service that starts at boot, install the included systemd service and run `sudo systemctl enable --now placekeeper-web.service` to start it now and at boot. See the [Linux service guide](docs/deployment.md#2-start-the-service-and-connect-accounts) for service installation and private network access.
 - **Termux.** Install `termux-services`, register Placekeeper with its supervisor, and run `sv-enable placekeeper` to run it in the background. Install Termux:Boot and add the startup script to bring it back after an Android reboot. See the [Termux guide](docs/termux.md#run-in-the-background) for the exact commands.
 
 ## 3. Connect your accounts
@@ -50,7 +53,7 @@ Keep the tunnel open while using the same [local Setup address](http://127.0.0.1
 | CrossPoint | Enter the sync username and password configured on the X4. Approve saving the sign-in key and select **Connect CrossPoint**. |
 | Libby | Select **Get Libby code**. In Libby, use **Menu → Copy To Another Device** and enter the code. Return to Placekeeper and select **Check connection**. |
 
-Once Setup says **Ready to sync**, return to the **Sync** page. The credentials are saved with owner-only permissions under `.private/`. **Disconnect** removes a connection from this installation. Manage remote device or reader grants in the provider’s account settings.
+Once Setup says **Ready to sync**, return to the **Sync** page. The credentials are saved with owner-only permissions in your Placekeeper data directory. **Disconnect** removes a connection from this installation. Manage remote device or reader grants in the provider’s account settings.
 
 ## 4. Sync your first book
 
@@ -97,11 +100,13 @@ The X4 identity adapter currently assumes the confirmed filename-MD5 mode and Re
 
 Private output:
 
-- `.private/onboarding/ready-profiles.json`: the accepted-profile registry; do not glob old profiles.
-- `.private/onboarding/books/<document>/profile.json`: EPUB/KFX fingerprints and validation.
-- `.private/onboarding/state.json`: completed library cursor, jobs, retries, and cache fingerprints.
-- `.private/manual-sync/`: private before-write snapshots and verification records.
-- `.private/web-last-sync.json`: last manual job result.
+Paths below are relative to the Placekeeper data directory.
+
+- `onboarding/ready-profiles.json`: the accepted-profile registry; do not glob old profiles.
+- `onboarding/books/<document>/profile.json`: EPUB/KFX fingerprints and validation.
+- `onboarding/state.json`: completed library cursor, jobs, retries, and cache fingerprints.
+- `manual-sync/`: private before-write snapshots and verification records.
+- `web-last-sync.json`: last manual job result.
 
 Automatically generated profiles remain marked `ready_for_dry_run`; this records structural validation, not a per-book physical handoff test. The Sync page can apply handoffs on demand, and enabling automatic progress sync in Setup allows scheduled handoffs.
 

@@ -9,11 +9,11 @@ from urllib.parse import urlsplit
 from zipfile import ZipFile
 
 import httpx
-from placekeeper.storage import ROOT, private_json
+from placekeeper.storage import default_data_root, private_json
 
 ORIGIN = 'https://web.readest.com'
-AUTH = ROOT/'.private/readest-device.json'
-PENDING = ROOT/'.private/readest-pairing.json'
+AUTH = default_data_root()/'readest-device.json'
+PENDING = default_data_root()/'readest-pairing.json'
 
 
 def pairing_start(auth=None, pending=None):

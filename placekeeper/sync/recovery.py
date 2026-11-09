@@ -4,12 +4,12 @@ import json
 from pathlib import Path
 import re
 
-from placekeeper.storage import ROOT, private_json, state_lock
+from placekeeper.storage import default_data_root, private_json, state_lock
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--data-root', type=Path, default=ROOT/'.private')
+    parser.add_argument('--data-root', type=Path, default=default_data_root())
     parser.add_argument('--clear', metavar='JOURNAL_ID',
                         help='Clear a pending write after confirming it did not land')
     args = parser.parse_args()

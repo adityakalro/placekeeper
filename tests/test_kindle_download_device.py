@@ -23,7 +23,7 @@ class RegistrationTests(unittest.TestCase):
                 'tokens': {'mac_dms': {'adp_token': 'new-secret', 'device_private_key': 'new-key'},
                            'bearer': {'access_token': 'bearer-secret', 'refresh_token': 'refresh-secret', 'expires_in': 3600}},
                 'extensions': {'device_info': {'device_type': 'AGZZ1ST63LKBW'}}}}}
-            with patch.object(device, 'ROOT', root), patch.object(device, 'DESTINATION', destination), \
+            with patch.object(device, 'default_data_root', return_value=root/'.private'), patch.object(device, 'DESTINATION', destination), \
                     patch.object(device.Authenticator, 'from_dict', return_value=auth), \
                     patch.object(device.httpx, 'post', return_value=response) as post:
                 result = device.register(device.plan())

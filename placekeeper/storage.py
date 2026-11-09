@@ -10,6 +10,16 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def default_data_root():
+    override = os.environ.get('PLACEKEEPER_DATA_DIR')
+    if override:
+        return Path(override).expanduser().resolve()
+    legacy = ROOT / '.private'
+    if legacy.exists() or legacy.is_symlink():
+        return legacy
+    return Path.home() / '.config' / 'placekeeper'
+
+
 def private_json(path, data):
     path = Path(path)
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)

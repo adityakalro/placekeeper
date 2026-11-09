@@ -1,6 +1,6 @@
 # Run Placekeeper as a Linux service
 
-This guide installs Placekeeper on a Linux host with systemd, such as DietPi. For a quick trial from a terminal, use the [README](../README.md). Run the commands below as root, or use `sudo` for the administrative commands.
+This guide installs Placekeeper on a Linux host with systemd, such as DietPi. For a regular-user installation in your home directory, follow the [README](../README.md#1-install-placekeeper). Run the commands below as root, or use `sudo` for the administrative commands.
 
 ## 1. Install the app and create its data directory
 
@@ -23,7 +23,7 @@ bash install.sh
 chown -R placekeeper:placekeeper /var/lib/placekeeper
 ```
 
-The service runs as `placekeeper`. The checkout and virtual environment live under `/opt/placekeeper`. Credentials, settings, and book maps live under `/var/lib/placekeeper`.
+The service runs as `placekeeper`. The checkout and virtual environment live under `/opt/placekeeper`. Credentials, settings, and book maps live under `/var/lib/placekeeper`. The `.private` symlink created above makes the installer and service use that directory.
 
 ## 2. Start the service and connect accounts
 
