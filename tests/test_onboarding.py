@@ -116,8 +116,9 @@ class OnboardingTests(unittest.TestCase):
                 patch('placekeeper.plugins.kindle.onboarding.extract_chapters',side_effect=ValueError('Unsupported voucher')):
             report = self.engine().run_once(self.root)
         self.assertEqual(order,['libby','x4','x4','x4','kindle'])
-        self.assertEqual(report['matches'],[
+        self.assertCountEqual(report['matches'],[
             {'title':store_title,'kind':'EBOK','status':'retry'},
+            {'title':missing_title,'kind':'EBOK','status':'retry'},
             {'title':TITLE,'kind':'PDOC','status':'ready'},
         ])
         self.assertEqual(self.downloads,1)
@@ -138,7 +139,7 @@ class OnboardingTests(unittest.TestCase):
         with patch('placekeeper.plugins.kindle.loan_discovery.Libby') as libby:
             libby.return_value.audiobook_loans.return_value=[]
             report=engine.run_once(self.root)
-        self.assertEqual(report['matches'],[])
+        self.assertEqual(report['matches'], [{'title': TITLE, 'kind': 'PDOC', 'status': 'ready'}])
         registry=json.loads((self.root/'ready-profiles.json').read_text())
         self.assertEqual([entry['document'] for entry in registry['profiles']],[DOC])
 

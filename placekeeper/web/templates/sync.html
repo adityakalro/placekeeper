@@ -18,6 +18,7 @@
   <h2>Book discovery</h2>
   <p class="muted">Find and map new books so their progress can sync.</p>
   <button id="discover" class="primary secondary" disabled>Find new books</button>
+  <p class="muted" id="discoverySchedule"></p>
   <p class="meta" id="discoveryResult" role="status">No discovery run yet.</p>
   <ul id="discoveryMatches" class="muted" hidden></ul>
 </section>
@@ -80,12 +81,13 @@ function render(s){
     }
     $('time').textContent=last.finished_at?'Finished '+new Date(last.finished_at).toLocaleString():'';
   }
+  $('discoverySchedule').textContent=s.discovery_enabled?'Automatic discovery runs every 6 hours.':'Automatic discovery is off.';
   const discovery=s.last_discovery||(last?.discovery?last:null);
   if(discovery){
     const counts=discovery.discovery||{};
     const matches=counts.matches;
     const summary=discovery.message||(matches
-      ? matches.length+' titles matched across Libby, X4, and Kindle · '+((counts.ready||0)+(counts.cached||0))+' verified maps available for progress sync'
+      ? matches.length+' titles discovered across your services · '+((counts.ready||0)+(counts.cached||0))+' verified maps available for progress sync'
       : (counts.ready||0)+' new maps · '+(counts.waiting_for_epub||0)+' waiting for a matching ebook')
       +(counts.discovery_error?' · '+counts.discovery_error+' catalog refresh failed':'');
     const loanStatus=counts.loan_check_failed?' · Could not finish checking Libby and X4 matches':'';
@@ -95,7 +97,10 @@ function render(s){
     list.hidden=!matches?.length;
     for(const match of matches||[]){
       const item=document.createElement('li');
-      const detail={ready:'Ready to sync',mapping_required:'Kindle store book matched. Progress mapping is required.',
+      const detail={open_libby:'Chapter map verified. Open the audiobook in Libby, play briefly, and sync your shelf.',
+        audio_mapping_required:'The audiobook chapter sequence could not be mapped.',
+        audio_unavailable:'Could not validate Libby. Try discovery again later.',
+        ready:'Ready to sync',mapping_required:'Kindle store book matched. Progress mapping is required.',
         edition_mismatch:'The ebook editions could not be verified.',retry:'Mapping failed. Try discovery again later.',
         retry_deferred:'Mapping retry pending.', delivery_unavailable:'Amazon denied delivery to this device. Placekeeper will retry later.'}[match.status]||'Map needs review.';
       item.textContent=match.title+' · '+detail;

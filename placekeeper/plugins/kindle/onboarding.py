@@ -5,6 +5,7 @@ No reading-progress writes. Uncertain matches are quarantined for review.
 from __future__ import annotations
 
 import argparse
+from bisect import bisect_right
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
@@ -27,14 +28,11 @@ from placekeeper.plugins.kindle.loan_discovery import MetadataIndex, active_loan
 from placekeeper.plugins.kindle.store_mapping import StoreDeliveryDenied, StoreMapper, extract_chapters
 from placekeeper.plugins.readest.client import ReadestSource
 from placekeeper.errors import ReadFailure
-from placekeeper.storage import ROOT, default_data_root, digest, private_json, state_lock
+from placekeeper.storage import ROOT, default_data_root, digest, file_sha256 as file_hash, private_json, state_lock
 from placekeeper.mapping.text import Mapper, epub_index, kfx_index
+from placekeeper.mapping.chapters import chapter_key, epub_entries
 
 VERSION = 1
-
-
-def file_hash(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def title_words(text):
@@ -157,6 +155,44 @@ class Onboarder:
             if evidence['accepted']:
                 accepted.append((candidate,epub,evidence,epub_text))
         private_json(directory/'match-evidence.json',checks)
+        if (not accepted and len(possible) == 1
+                and checks[0]['evidence']['epub_to_kfx']['adequate']
+                and checks[0]['evidence']['kfx_to_epub']['adequate']):
+            chapters = directory/'map/chapters.json'
+            candidate = possible[0]
+            epub = self.root/'epubs'/(candidate['id']+'.epub')
+            index = epub_text
+            locations_data = json.loads(locations.read_text())
+            starts = [row['position'] for row in locations_data]
+            table = []
+            try:
+                for label, offset in epub_entries(epub, index.coordinates):
+                    if not chapter_key(label).startswith('chapter '):
+                        continue
+                    matched = index.unique_match(kindle_text, offset)
+                    position = kindle_text.coordinates[matched]
+                    table.append([label, bisect_right(starts, position)])
+            except ValueError:
+                return {'status':'edition_mismatch', 'catalog_signature':catalog_signature}
+            chapter_table = {'locations':len(starts), 'toc':table}
+            try:
+                StoreMapper(epub, chapter_table, epub_text=index)
+            except ValueError:
+                return {'status':'edition_mismatch', 'catalog_signature':catalog_signature}
+            private_json(chapters, chapter_table)
+            filename = candidate['title']+'.epub'
+            if title_counts[candidate['title']] != 1 or any(c in filename for c in '<>:"/\\|?*'):
+                return {'status':'needs_review', 'catalog_signature':catalog_signature}
+            files = {name: {'path':str(path.resolve()), 'sha256':file_hash(path)}
+                     for name, path in [('epub',epub),('chapters',chapters)]}
+            profile_path = directory/'profile.json'
+            private_json(profile_path, {'schema_version':3, 'kind':'PDOC', 'document':doc,
+                'readest_id':candidate['id'], 'x4_filename':filename, 'files':files,
+                'crosspoint_document':hashlib.md5(filename.encode()).hexdigest(),
+                'mapping_method':'approximate chapter fractions'})
+            return {'status':'ready', 'profile':str(profile_path), 'readest_id':candidate['id'],
+                    'profile_sha256':file_hash(profile_path), 'files':files,
+                    'catalog_signature':catalog_signature}
         if len(accepted)!=1:
             return {'status':'needs_review' if accepted else 'edition_mismatch',
                     'candidate_count':len(possible),'accepted_count':len(accepted),
@@ -325,14 +361,13 @@ class Onboarder:
             report={'mode':'onboarding_only','progress_writes':0,'events':events,
                     'amazon_pages':amazon['pages'],
                     'readest_books':len(books)}
-            if loan_root is not None:
-                report['loan_check_failed'] = loan_check_failed
-                statuses={event['document']:event['status'] for event in events}
-                report['matches']=[
-                    {'title':book['title'],'kind':documents[doc].get('kind','PDOC'),
-                     'status':'ready' if doc in ready else statuses.get(doc,'mapping_required')}
-                    for doc,book in selected.items()
-                ]
+            report['loan_check_failed'] = loan_check_failed
+            report['matches'] = [
+                {'title': documents[doc]['title'], 'kind': documents[doc].get('kind', 'PDOC'),
+                 'status': 'ready' if doc in ready else job['status']}
+                for doc, job in self.state['jobs'].items()
+                if doc in documents and job['status'] not in ('waiting_for_epub', 'removed')
+            ]
             private_json(self.root/'last-run.json',report)
             return report
 

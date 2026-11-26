@@ -15,7 +15,7 @@ def observe(readers, state, pool, mapping_skips):
     pending = state.get('pending') or {}
 
     def read(key, reader):
-        hint = {'need_timestamp': False, 'receipt': state['receipts'].get(key),
+        hint = {'receipt': state['receipts'].get(key),
                 'pending': pending if pending.get('device') == key else None}
         try:
             return reader.read(hint)

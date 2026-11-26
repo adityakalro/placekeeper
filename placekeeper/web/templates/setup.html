@@ -7,6 +7,7 @@
   <p class="muted">Sync progress for books that already have maps. Use Find new books on the Sync page to discover and map new titles.</p>
   <form id="scheduleForm">
     <label class="check"><input type="checkbox" id="scheduleEnabled" disabled> Sync reading and listening progress every 30 minutes</label>
+    <label class="check"><input type="checkbox" id="discoveryEnabled"> Discover and map new books every 6 hours</label>
     <button class="primary secondary" id="saveSchedule" disabled>Save schedule</button>
   </form>
   <p class="muted setup-feedback" id="scheduleMessage" role="status"></p>
@@ -111,9 +112,9 @@ document.getElementById('scheduleForm').onsubmit=async event=>{
   scheduleEnabled.disabled=saveSchedule.disabled=true;
   scheduleMessage.classList.remove('error');
   try{
-    const result=await call('/api/schedule',{enabled:scheduleEnabled.checked});
+    const result=await call('/api/schedule',{enabled:scheduleEnabled.checked,discovery_enabled:document.getElementById('discoveryEnabled').checked});
     scheduleEnabled.checked=result.enabled;
-    scheduleMessage.textContent=result.enabled?'Automatic sync enabled.':'Automatic sync disabled.';
+    scheduleMessage.textContent='Schedule saved.';
   }catch(error){
     scheduleMessage.textContent=error.message;
     scheduleMessage.classList.add('error');
@@ -123,6 +124,7 @@ async function refresh(){
   const status=await call('/api/status');
   if(!scheduleLoaded){
     scheduleEnabled.checked=status.schedule_enabled;
+    document.getElementById('discoveryEnabled').checked=status.discovery_enabled;
     scheduleEnabled.disabled=saveSchedule.disabled=false;
     scheduleLoaded=true;
   }

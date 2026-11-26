@@ -9,7 +9,6 @@ from pathlib import Path
 import secrets
 import threading
 from time import monotonic
-from urllib.parse import urlsplit
 
 import httpx
 
@@ -20,6 +19,7 @@ from placekeeper.storage import default_data_root, onboarding_lock, private_json
 
 
 PROGRESS_INTERVAL = 30 * 60
+DISCOVERY_INTERVAL = 6 * 60 * 60
 
 
 class Jobs:
@@ -38,6 +38,8 @@ class Jobs:
         self.schedule_changed=threading.Condition()
         self.schedule_enabled=self.load('web-schedule.json', {}).get('enabled') is True
         self.next_sync=monotonic()+PROGRESS_INTERVAL if self.schedule_enabled else None
+        self.discovery_enabled=self.load('web-schedule.json', {}).get('discovery_enabled') is True
+        self.next_discovery=monotonic() if self.discovery_enabled else None
         self.scheduler_stopped=False
 
     def load(self, name, default):
@@ -57,7 +59,7 @@ class Jobs:
         return {'connected':self.connections.ready(), 'services':self.connections.status(),
                 'can_discover':self.discovery_ready(), 'running_job':self.running_job,
                 'running':self.running,'phase':self.phase,'last':self.last,
-                'last_discovery':self.last_discovery,'schedule_enabled':self.schedule_enabled}
+                'last_discovery':self.last_discovery,'schedule_enabled':self.schedule_enabled, 'discovery_enabled':self.discovery_enabled}
 
     def discover(self):
         return refresh_libraries(self.root,self.connections.connected())
@@ -65,12 +67,18 @@ class Jobs:
     def sync_books(self,notify):
         return run_books(self.root,self.connections.connected(),notify)
 
-    def set_schedule(self, enabled):
+    def set_schedule(self, enabled, discovery_enabled=None):
         if type(enabled) is not bool:
             raise ValueError('Choose whether to enable automatic progress sync.')
+        if discovery_enabled is None:
+            discovery_enabled = self.discovery_enabled
+        if type(discovery_enabled) is not bool:
+            raise ValueError('Choose whether to discover books automatically.')
         with self.schedule_changed:
-            if enabled != self.schedule_enabled:
-                private_json(self.root/'web-schedule.json', {'enabled': enabled})
+            if enabled != self.schedule_enabled or discovery_enabled != self.discovery_enabled:
+                private_json(self.root/'web-schedule.json', {'enabled': enabled, 'discovery_enabled': discovery_enabled})
+                self.discovery_enabled=discovery_enabled
+                self.next_discovery=monotonic() if discovery_enabled else None
                 self.schedule_enabled=enabled
                 self.next_sync=monotonic()+PROGRESS_INTERVAL if enabled else None
                 self.schedule_changed.notify()
@@ -78,18 +86,28 @@ class Jobs:
     def schedule(self):
         with self.schedule_changed:
             while not self.scheduler_stopped:
-                if self.next_sync is None:
+                due = [(stamp, job) for stamp, job in
+                       ((self.next_sync, 'progress'), (self.next_discovery, 'discovery')) if stamp is not None]
+                if not due:
                     self.schedule_changed.wait()
                     continue
-                remaining=self.next_sync-monotonic()
+                stamp, job = min(due)
+                remaining=stamp-monotonic()
                 if remaining > 0:
                     self.schedule_changed.wait(remaining)
                     continue
-                self.next_sync=monotonic()+PROGRESS_INTERVAL
+                if job == 'discovery':
+                    self.next_discovery=monotonic()+DISCOVERY_INTERVAL
+                else:
+                    self.next_sync=monotonic()+PROGRESS_INTERVAL
                 try:
-                    self.start()
+                    started = self.start(job)
+                    if not started:
+                        if job == 'discovery':
+                            self.next_discovery=monotonic()+60
+                        else:
+                            self.next_sync=monotonic()+60
                 except ValueError:
-                    # Connections can be added or removed between scheduled checks.
                     continue
 
     def stop_scheduler(self):
@@ -213,10 +231,10 @@ def handler_for(jobs,hosts,networks):
                 except (httpx.HTTPError,OSError,KeyError,TypeError):self.send(502,{'error':'Could not complete setup. Check the service and try again.'});return
                 self.send(200,result)
             elif self.path=='/api/schedule':
-                try:jobs.set_schedule(data.get('enabled'))
+                try:jobs.set_schedule(data.get('enabled'), data.get('discovery_enabled'))
                 except ValueError as e:self.send(400,{'error':str(e)});return
                 except OSError:self.send(500,{'error':'Could not save the schedule.'});return
-                self.send(200,{'enabled':jobs.schedule_enabled})
+                self.send(200,{'enabled':jobs.schedule_enabled, 'discovery_enabled':jobs.discovery_enabled})
             elif self.path in ('/api/sync','/api/discover'):
                 try:started=jobs.start('discovery' if self.path=='/api/discover' else 'progress')
                 except ValueError as e:self.send(400,{'error':str(e)});return

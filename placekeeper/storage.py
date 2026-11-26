@@ -33,6 +33,11 @@ def private_json(path, data):
         Path(temporary).unlink(missing_ok=True)
 
 
+def file_sha256(path):
+    with Path(path).open('rb') as source:
+        return hashlib.file_digest(source, 'sha256').hexdigest()
+
+
 def digest(data):
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 

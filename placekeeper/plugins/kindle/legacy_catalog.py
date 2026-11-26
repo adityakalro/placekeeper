@@ -30,6 +30,11 @@ def discover(root, connected):
     counts = dict(Counter(event['status'] for event in report['events']))
     if report.get('loan_check_failed'):
         counts['loan_check_failed'] = 1
+    if 'libby' in connected:
+        from placekeeper.plugins.libby.validation import validate_books
+        registry = json.loads((root/'onboarding/ready-profiles.json').read_text())
+        profiles = [json.loads(Path(entry['path']).read_text()) for entry in registry['profiles']]
+        report.setdefault('matches', []).extend(validate_books(root, profiles))
     if 'matches' in report:
         counts['matches'] = report['matches']
     return counts
@@ -72,7 +77,7 @@ def books(root):
                 epub = path.resolve().parent.parent / epub
             title = profile.get('x4_filename', epub.name).removesuffix('.epub')
             kind = profile.get('kind', 'PDOC')
-            names = ('epub', 'chapters') if kind == 'EBOK' else ('epub', 'content', 'locations')
+            names = ('epub', 'chapters') if profile.get('schema_version') == 3 else ('epub', 'content', 'locations')
             edition = ":".join(profile['files'][name]['sha256'] for name in names)
             yield Book('kindle:' + document, title, edition,
                        {'kindle': document, 'kindle_kind': kind, 'crosspoint': profile['crosspoint_document']},

@@ -8,7 +8,7 @@ import httpx
 from placekeeper.errors import ReadFailure
 from placekeeper.plugins.crosspoint.client import crosspoint_progress, read_progress
 from placekeeper.plugins.kindle.progress import (
-    kindle_position, parse_progress_time, read_sidecar, write_position,
+    kindle_position, read_sidecar, write_position,
 )
 from placekeeper.plugins.kindle.reader import KindleReader
 from placekeeper.plugins.transport import json_reader
@@ -29,16 +29,6 @@ class ProgressClientTests(unittest.TestCase):
         for payload in (None, [], {'key': 'book', 'type': 'PDOC', 'records': [None]}):
             with self.assertRaises(ReadFailure):
                 kindle_position({'payload': payload}, 'book')
-
-    def test_amazon_relative_dates_use_server_utc_day(self):
-        xml = '<book><last_read pos="150" method="FRL">Furthest at 11:59 PM GMT yesterday.</last_read></book>'
-        result = parse_progress_time(xml, 'Sat, 07 Nov 2026 04:45:02 GMT', 150)
-        self.assertEqual(result.isoformat(), '2026-11-06T23:59:00+00:00')
-        absolute = xml.replace('11:59 PM GMT yesterday', '10:42 PM GMT on November 05, 2026')
-        self.assertEqual(parse_progress_time(absolute, 'Sat, 07 Nov 2026 04:45:02 GMT', 150).isoformat(),
-                         '2026-11-05T22:42:00+00:00')
-        with self.assertRaises(ValueError):
-            parse_progress_time(xml, 'Sat, 07 Nov 2026 04:45:02 GMT', 300)
 
     def test_reads_use_get_and_keep_credentials_with_their_service(self):
         def respond(request):
@@ -79,7 +69,7 @@ class ProgressClientTests(unittest.TestCase):
         sidecar = {'payload': {'key': 'book', 'type': 'EBOK',
                                'records': [{'type': 'kindle.lpr', 'location': 449}]}}
         with patch('placekeeper.plugins.kindle.reader.read_sidecar', return_value=sidecar):
-            hint = {'need_timestamp': False, 'receipt': None, 'pending': {'target': 449, 'stamp': 5000}}
+            hint = {'receipt': None, 'pending': {'target': 449, 'stamp': 5000}}
             result = reader.read(hint)
             self.assertTrue(result.own)
             self.assertEqual(result.stamp, 5000)

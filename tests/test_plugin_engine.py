@@ -279,6 +279,19 @@ class PluginEngineTests(unittest.TestCase):
         self.assertEqual(result['outcomes'], {'a': 'verified'})
         self.assertEqual(second.writes, [])
 
+    def test_audio_introduction_can_advance_to_first_mapped_chapter(self):
+        chapters = Mock()
+        chapters.rows = [('Chapter One', 20, 100, 1_080_000, 1_790_000)]
+        chapters.to_text.side_effect = ValueError('Before the mapped chapters')
+        chapters.to_audio.return_value = (1_080_000, 'Chapter One')
+        from placekeeper.mapping.text import TextIndex
+        coordinates = TextIndex.make([('a'*100, lambda offset: f'/body/p[1]/text()[1].{offset}')]).coordinates
+        reader = LibbyReader(Mock(), {}, Mock(), '', {}, chapters, coordinates, {'timestamp': 1000})
+        with patch('placekeeper.plugins.libby.reader.elapsed', return_value=0):
+            current = reader.read({})
+        self.assertEqual(current.anchor, 0)
+        self.assertEqual(reader.target(20, current), 1_080_000)
+
     def test_audio_tolerance_is_sixty_seconds_in_both_comparisons(self):
         chapters = Mock()
         chapters.to_audio.side_effect = lambda coordinate: (coordinate, 'Chapter')

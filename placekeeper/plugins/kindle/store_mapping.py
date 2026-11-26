@@ -73,6 +73,24 @@ def delivery(document, auth_path):
 
 
 
+def chapter_table(book, positions, locations):
+    from kfxlib.ion import unannotated
+    toc = []
+    for fragment in book.fragments.get_all('$389'):
+        for order in fragment.value:
+            for nav in map(unannotated, order.get('$392', [])):
+                if isinstance(nav, dict) and nav.get('$235') == '$212':
+                    for entry in map(unannotated, nav['$247']):
+                        label = unannotated(entry['$241']).get('$244', '')
+                        pointer = unannotated(entry['$246'])
+                        position = book.pid_for_eid(pointer['$155'], pointer.get('$143', 0), positions)
+                        if label and position is not None:
+                            toc.append([label, bisect_right(locations, position)])
+    if not toc:
+        raise ValueError("Kindle chapter table is unavailable")
+    return {"locations": len(locations), "toc": toc}
+
+
 def extract_chapters(document, auth_path, parser_path):
     serial, voucher_data, base, metadata = delivery(document, auth_path)
     paths = [str(parser_path), str(Path(parser_path)/'kfxlib/calibre-plugin-modules')]
@@ -81,7 +99,6 @@ def extract_chapters(document, auth_path, parser_path):
     try:
         from dedrm.drmion import decrypt
         from dedrm.ion import DrmIonVoucher
-        from kfxlib.ion import unannotated
         from kfxlib.kfx_container import KfxContainer
         from kfxlib.utilities import DataFile
         from kfxlib.yj_book import YJ_Book
@@ -106,20 +123,7 @@ def extract_chapters(document, auth_path, parser_path):
             if not locations or locations != sorted(locations):
                 raise ValueError('Kindle Store location table is incomplete')
             phase = 'reading chapter table'
-            toc = []
-            for fragment in book.fragments.get_all('$389'):
-                for order in fragment.value:
-                    for nav in map(unannotated, order.get('$392', [])):
-                        if isinstance(nav, dict) and nav.get('$235') == '$212':
-                            for entry in map(unannotated, nav['$247']):
-                                label = unannotated(entry['$241']).get('$244', '')
-                                pointer = unannotated(entry['$246'])
-                                position = book.pid_for_eid(pointer['$155'], pointer.get('$143', 0), positions)
-                                if label and position is not None:
-                                    toc.append([label, bisect_right(locations, position)])
-            if not toc:
-                raise ValueError('Kindle Store chapter table is unavailable')
-            return {'locations': len(locations), 'toc': toc}
+            return chapter_table(book, positions, locations)
     except Exception as error:
         raise ValueError(f'Kindle Store extraction failed while {phase} ({type(error).__name__})') from None
     finally:
@@ -129,8 +133,8 @@ def extract_chapters(document, auth_path, parser_path):
 class StoreMapper:
     """Map within matching numbered chapters using Kindle location buckets."""
 
-    def __init__(self, epub, table):
-        self.epub = epub_index(epub)
+    def __init__(self, epub, table, *, epub_text=None):
+        self.epub = epub_text if epub_text is not None else epub_index(epub)
         ebook = [(chapter_key(label), anchor) for label, anchor in epub_entries(epub, self.epub.coordinates)]
         kindle = [(chapter_key(label), location) for label, location in table['toc']]
         if any(type(location) is not int or not 1 <= location <= table['locations'] for _, location in kindle):

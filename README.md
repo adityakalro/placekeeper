@@ -62,13 +62,13 @@ Once Setup says **Ready to sync**, return to the **Sync** page. The credentials 
 3. In Placekeeper, click **Find new books** to discover the book and build its map. A long book can take a minute or more on a small Pi. When discovery finishes, click **Sync now** to transfer progress. Each job shows its own result.
 4. On the destination, use **Sync Progress** on X4, **Sync to Furthest Page Read** on Kindle, or **Shelf → Actions → Synchronize Shelf** in Libby. Open the book or audiobook to pick up the saved position.
 
-For future handoffs, sync the device you were using before clicking **Sync now**. Placekeeper compares mapped reading and listening positions and moves readers forward to the furthest position. It suppresses echoes from its own earlier writes. In **Setup**, you can enable automatic progress sync every 30 minutes. It starts off disabled, and the Sync page shows whether it is on. Both **Sync now** and the schedule use existing maps. Use **Find new books** when you add a title.
+For future handoffs, sync the device you were using before clicking **Sync now**. Placekeeper compares mapped reading and listening positions and moves readers forward to the furthest position. It suppresses echoes from its own earlier writes. In **Setup**, you can enable automatic progress sync every 30 minutes. It starts off disabled, and the Sync page shows whether it is on. Both **Sync now** and the schedule use existing maps. Use **Find new books** when you add a title, or enable automatic discovery every six hours in Setup. Discovery validates chapter mappings and activates successful maps. If Libby has no saved position, the discovery result asks you to open and sync the audiobook once.
 
 ## How Find new books selects titles
 
 With Libby and CrossPoint connected, Placekeeper starts with active Libby audiobook loans. It matches the title and author to the Readest EPUB catalog and checks for a saved X4 position using the EPUB filename. Then it checks the Kindle library for a matching personal document or Kindle store book. Run **Sync Progress** on the X4 once for a book to make it discoverable. Keep the Readest filename and use filename matching on the X4.
 
-The discovery result lists the titles found on all three services. When both copies map to the same EPUB, the verified personal document takes precedence. For Store editions, Placekeeper downloads chapter and location data using the connected Kindle device and a compatible Amazon voucher. If Amazon denies delivery or the chapter sequences disagree, the Store copy stays out of progress sync. If a mapped book is missing from Libby or the X4, the other two readers can still sync when both have saved positions.
+Discovery includes titles available to a pair of readers. Kindle–X4 and Kindle–Libby use the Kindle edition map. X4–Libby can use a Readest EPUB directly when Kindle is absent or its edition cannot be mapped. The results also show Kindle mapping failures for review. When both copies map to the same EPUB, the verified personal document takes precedence. For Store editions, Placekeeper downloads chapter and location data using the connected Kindle device and a compatible Amazon voucher. If Amazon denies delivery or the chapter sequences disagree, the Store copy stays out of progress sync. If a mapped book is missing from Libby or the X4, the other two readers can still sync when both have saved positions.
 
 ## Using only some services
 
@@ -110,7 +110,7 @@ Paths below are relative to the Placekeeper data directory.
 
 Automatically generated profiles remain marked `ready_for_dry_run`; this records structural validation, not a per-book physical handoff test. The Sync page can apply handoffs on demand, and enabling automatic progress sync in Setup allows scheduled handoffs.
 
-Library pagination must complete before the cursor is committed. Cache changes trigger rebuilds. Removed or newly ambiguous matches leave the ready registry. Only one manual job runs at a time, and every handoff rechecks the connected readers before writing.
+Library pagination must complete before the cursor is committed. Cache changes trigger rebuilds. Unchanged Readest EPUBs are reused, and successful audiobook chapter validation is cached by the EPUB fingerprint and chapter timings; changed inputs trigger revalidation. File fingerprints are streamed to avoid loading entire books just to hash them. Removed or newly ambiguous matches leave the ready registry. Only one manual job runs at a time, and every handoff rechecks the connected readers before writing.
 
 To preview a handoff using the same planner as **Sync now**:
 
@@ -137,3 +137,5 @@ The [synthetic test EPUB](tests/fixtures/Placekeeper%20Progress%20Test.epub) con
 See [sharing guide](docs/sharing.md) for the publication boundary. The implementation is a personal prototype, using unofficial service endpoints.
 
 Protocol references: [Kindle registration research](https://github.com/mkb79/kindle), [personal-document KFX delivery](https://github.com/kafkasl/ksync), [Readest reader APIs](https://github.com/readest/readest/tree/main/apps/readest-app/src/app/api/crosspoint), and [CrossPoint Sync API](https://github.com/crosspoint-reader/crosspoint-sync/blob/main/docs/API.md).
+
+Chapter mapping can approximate compatible Send to Kindle editions when their texts differ slightly. Discovery matches every numbered EPUB chapter start to unique Kindle text, then estimates progress within each matched chapter. Audiobook validation checks the numbered chapter sequence and samples each chapter in both directions.

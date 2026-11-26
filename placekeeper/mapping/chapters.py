@@ -1,5 +1,4 @@
 """Approximate ebook/audio handoffs using matched chapter boundaries."""
-import bisect
 from collections import defaultdict
 import re
 import unicodedata

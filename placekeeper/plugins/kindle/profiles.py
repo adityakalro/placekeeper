@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 
 from placekeeper.mapping.text import Mapper
-from placekeeper.storage import digest
+from placekeeper.storage import digest, file_sha256
 
 
 def load_profile(path, *, expected_sha256=None):
@@ -28,12 +28,12 @@ def load_profile(path, *, expected_sha256=None):
         source = Path(record['path'])
         if not source.is_absolute():
             source = path.parent.parent/source
-        if hashlib.sha256(source.read_bytes()).hexdigest() != record['sha256']:
+        if file_sha256(source) != record['sha256']:
             raise ValueError(f'{name} fingerprint differs from the validated book map')
         files[name] = source
     if store_book:
         from .store_mapping import StoreMapper
-        if (profile.get('kind') != 'EBOK'
+        if (profile.get('kind') not in ('EBOK', 'PDOC')
                 or hashlib.md5(profile['x4_filename'].encode()).hexdigest() != profile['crosspoint_document']):
             raise ValueError('Store profile has an unsupported identity')
         return profile, StoreMapper(files['epub'], json.loads(files['chapters'].read_text())), digest(profile)

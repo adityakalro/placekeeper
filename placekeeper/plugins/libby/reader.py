@@ -25,7 +25,10 @@ class LibbyReader:
         try:
             coordinate, _ = self.chapters.to_text(native)
         except ValueError:
-            raise UnsupportedMapping('Libby is outside the mapped chapters.') from None
+            if native < self.chapters.rows[0][3]:
+                coordinate = self.coordinates[0]
+            else:
+                raise UnsupportedMapping('Libby is outside the mapped chapters.') from None
         stamp = marker.get('timestamp')
         if type(stamp) not in (int, float) or stamp <= 0:
             stamp = None

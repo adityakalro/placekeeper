@@ -4,10 +4,11 @@ Usage: python -m placekeeper.plugins.kindle.extract_kfx BOOK.azw8 OUTPUT_DIR --k
 No credentials, network requests, or DRM processing are performed here.
 """
 import argparse
-import hashlib
 import json
 from pathlib import Path
 import sys
+
+from placekeeper.storage import file_sha256
 
 
 def main():
@@ -36,7 +37,7 @@ def main():
     save('content.json', content if isinstance(content, bytes) else content.encode())
     save('locations.json', json.dumps([{'location': i+1, 'position': c.pid, 'length': c.length}
                                       for i, c in enumerate(locations)]).encode())
-    save('source.json', json.dumps({'sha256': hashlib.sha256(args.book.read_bytes()).hexdigest(),
+    save('source.json', json.dumps({'sha256': file_sha256(args.book),
                                    'location_count': len(locations), 'bridge_validated': False}).encode())
     print(json.dumps({'location_count': len(locations), 'output': str(args.output)}))
 

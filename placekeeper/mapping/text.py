@@ -10,21 +10,28 @@ from array import array
 from bisect import bisect_left, bisect_right
 from collections.abc import Sequence
 from dataclasses import dataclass
-import hashlib
 import json
 from pathlib import Path
 import unicodedata
 from zipfile import ZipFile
 
 from placekeeper.mapping.epub import body, package, text_runs
+from placekeeper.storage import file_sha256
+
+
+PUNCTUATION = {'’': "'", '‘': "'", '“': '"', '”': '"', '\u00ad': ''}
 
 
 def normalized(text):
     # Keep a source coordinate for every normalized character, including NFKC
     # expansions. Ignoring whitespace handles inline tags and line wrapping.
     for index, char in enumerate(text):
+        if char.isascii():
+            if not char.isspace():
+                yield char, index
+            continue
         for c in unicodedata.normalize('NFKC', char):
-            c = {'’': "'", '‘': "'", '“': '"', '”': '"', '\u00ad': ''}.get(c, c)
+            c = PUNCTUATION.get(c, c)
             if c and not c.isspace():
                 yield c, index
 
@@ -36,7 +43,7 @@ class TextIndex:
 
     @classmethod
     def make(cls, runs):
-        chars, coordinates = [], Coordinates()
+        chunks, coordinates = [], Coordinates()
         for text, coordinate in runs:
             first=coordinate(0)
             start=len(coordinates)
@@ -48,14 +55,16 @@ class TextIndex:
             if coordinates.string is not None and coordinates.string!=string:
                 raise ValueError('Mixed coordinate domains')
             coordinates.string=string
+            chars = []
             for char, offset in normalized(text):
                 chars.append(char)
                 coordinates.values.append(offset if string else coordinate(offset))
+            chunks.append(''.join(chars))
             if string and len(coordinates)>start:
                 coordinates.starts.append(start)
                 coordinates.prefixes.append(prefix)
                 coordinates.nodes[prefix]=(start,len(coordinates))
-        return cls(''.join(chars), coordinates)
+        return cls(''.join(chunks), coordinates)
 
     def unique_match(self, other, index):
         # Require substantial context; grow in both directions for repeated
@@ -127,14 +136,14 @@ class Coordinates(Sequence):
 
 
 def epub_index(path):
-    runs = []
-    with ZipFile(path) as z:
-        _, _, _, files = package(z)
-        for fragment, filename in enumerate(files, 1):
-            prefix = f'/body/DocFragment[{fragment}]/body'
-            for xpath, text in text_runs(body(z, filename), prefix):
-                runs.append((text, lambda offset, path=xpath: f'{path}.{offset}'))
-    return TextIndex.make(runs)
+    def runs():
+        with ZipFile(path) as z:
+            _, _, _, files = package(z)
+            for fragment, filename in enumerate(files, 1):
+                prefix = f'/body/DocFragment[{fragment}]/body'
+                for xpath, text in text_runs(body(z, filename), prefix):
+                    yield text, lambda offset, path=xpath: f'{path}.{offset}'
+    return TextIndex.make(runs())
 
 
 def kfx_index(path):
@@ -239,7 +248,7 @@ def main():
     args = parser.parse_args()
     mapper = Mapper(args.epub, args.content, args.locations)
     result = mapper.from_xpointer(args.xpointer) if args.xpointer else mapper.from_sidecar(args.sidecar)
-    result['fingerprints'] = {name: hashlib.sha256(path.read_bytes()).hexdigest()
+    result['fingerprints'] = {name: file_sha256(path)
                               for name, path in [('epub', args.epub), ('content', args.content), ('locations', args.locations)]}
     print(json.dumps(result, indent=2))
 

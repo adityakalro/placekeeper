@@ -35,7 +35,12 @@ class KindleReader:
         return self.mapper.from_xpointer(self.mapper.epub.coordinates[anchor])['sidecar_range']
 
     def equivalent(self, first, second):
-        return first == second or self.bucket(first) == self.bucket(second)
+        if first == second:
+            return True
+        try:
+            return self.bucket(first) == self.bucket(second)
+        except ValueError:
+            return False
 
     def target(self, anchor, current):
         low, high = self.bucket(anchor)
