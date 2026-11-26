@@ -9,6 +9,7 @@ from http.server import ThreadingHTTPServer
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 from xml.etree import ElementTree as ET
+from unittest.mock import Mock, patch
 
 from placekeeper.plugins.library.storage import save, records, book_path, MAX_UPLOAD
 from placekeeper.plugins.library.source import LibrarySource
@@ -28,7 +29,8 @@ class LibraryTests(unittest.TestCase):
             source=LibrarySource(root)
             try:
                 self.assertEqual(source.books(),[book])
-                self.assertEqual(source.download(book,root/'copies').read_bytes(),data)
+                self.assertEqual(source.download(book,root/'copies'),book_path(root,book['id']))
+                self.assertFalse((root/'copies').exists())
             finally:source.close()
             xml=ET.fromstring(feed(root))
             link=xml.find('{*}entry/{*}link')
@@ -67,6 +69,23 @@ class LibraryTests(unittest.TestCase):
                 self.assertIn(result['id'],request('/opds').read().decode())
                 self.assertIn(result['id'],request('/opds/').read().decode())
                 self.assertIn(result['id'],request('/opds?offset=0').read().decode())
+                from test_kindle_email import CONFIG
+                auth={'Origin':'http://localhost','X-Placekeeper':token,'Content-Type':'application/json'}
+                saved=json.load(request('/api/kindle-email',json.dumps(CONFIG).encode(),**auth))
+                self.assertTrue(saved['configured']);self.assertNotIn('password',saved)
+                self.assertNotIn('password',json.load(request('/api/kindle-email')))
+                smtp=Mock()
+                from placekeeper.plugins.kindle.email_delivery import send_book
+                with patch('smtplib.SMTP_SSL',return_value=smtp), patch('placekeeper.web.app.run_worker',side_effect=lambda root,job,notify,**kw:send_book(root,kw['book_id'])) as worker:
+                    payload=json.dumps({'id':result['id']}).encode()
+                    sent=json.load(request('/api/library/send-kindle',payload,**auth))
+                    self.assertEqual(sent['status'],'sent')
+                    duplicate=json.load(request('/api/library/send-kindle',payload,**auth))
+                    self.assertTrue(duplicate['duplicate']);self.assertEqual(smtp.send_message.call_count,1)
+                    self.assertEqual(worker.call_args.args[1],'email')
+                    self.assertEqual(worker.call_args.kwargs['timeout'],180)
+                library=json.load(request('/api/library'))
+                self.assertEqual(library['kindle_email']['deliveries'][result['id']],'sent')
                 with self.assertRaises(HTTPError) as error:request('/epubs/invalid/test.epub')
                 error.exception.close()
             finally:

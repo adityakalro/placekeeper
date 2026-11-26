@@ -32,6 +32,23 @@
   <button type="button" class="primary secondary" id="testHealth">Create test alert</button>
   <p class="muted setup-feedback" id="healthMessage" role="status"></p>
 </section>
+<section class="card">
+  <h2>Send to Kindle email</h2>
+  <p class="muted">Uploading never sends email. Press Send to Kindle beside a library book to send it. Add the sender below to Amazon’s Approved Personal Document Email List and enable Personal Document Archiving for library discovery. Delivery is limited to 20 MiB EPUBs.</p>
+  <form id="kindleEmailForm">
+    <label>SMTP server<input name="host" required placeholder="smtp.example.com" autocomplete="off"></label>
+    <label>SMTP port<input name="port" type="number" min="1" max="65535" value="465" required></label>
+    <label>Connection security<select name="security"><option value="ssl">TLS (usually port 465)</option><option value="starttls">STARTTLS (usually port 587)</option></select></label>
+    <label>SMTP username<input name="username" required autocomplete="off"></label>
+    <label>SMTP password or app password<input name="password" type="password" autocomplete="new-password" placeholder="Leave blank to keep saved password"></label>
+    <label>Approved sender email<input name="sender" type="email" required></label>
+    <label>Send to Kindle email<input name="recipient" type="email" required placeholder="your-address@kindle.com"></label>
+    <label class="check"><input name="consent" type="checkbox" required> Save email credentials privately on this installation.</label>
+    <button class="primary secondary">Save email settings</button>
+  </form>
+  <button id="clearKindleEmail" type="button" class="primary secondary">Remove email settings</button>
+  <p id="kindleEmailMessage" class="muted" role="status"></p>
+</section>
 <div id="services"></div>
 <footer>Connections apply to this installation. Manage remote device grants in the provider’s account settings.</footer>
 </main>
@@ -184,4 +201,28 @@ async function refresh(){
   document.getElementById('setupStatus').textContent=status.running?'A sync is running.':status.connected?'Ready to sync.':'Connect two readers and a book catalog.';
 }
 refresh().catch(error=>{document.getElementById('setupStatus').textContent=error.message});
+</script>
+<script nonce="NONCE">
+const emailForm=document.getElementById('kindleEmailForm'),emailFeedback=document.getElementById('kindleEmailMessage');
+async function loadEmailSettings(){
+  try{
+    const config=await call('/api/kindle-email');
+    for(const key of ['host','port','security','username','sender','recipient'])if(config[key]!==undefined)emailForm.elements[key].value=config[key];
+    emailFeedback.textContent=config.configured?'Configured. Books are sent only when you press Send to Kindle.':'Email delivery is not configured.';
+  }catch(error){emailFeedback.textContent=error.message;}
+}
+emailForm.onsubmit=async event=>{
+  event.preventDefault();const button=emailForm.querySelector('button');button.disabled=true;
+  try{
+    const data=Object.fromEntries(new FormData(emailForm));data.consent=data.consent==='on';
+    await call('/api/kindle-email',data);emailForm.elements.password.value='';emailForm.elements.consent.checked=false;
+    emailFeedback.textContent='Email settings saved. Use Send to Kindle beside an uploaded book.';
+  }catch(error){emailFeedback.textContent=error.message;}finally{button.disabled=false;}
+};
+document.getElementById('clearKindleEmail').onclick=async()=>{
+  if(!confirm('Remove saved email credentials? Delivery history will be kept to prevent duplicate sends.'))return;
+  try{await call('/api/kindle-email',{clear:true});emailForm.reset();emailFeedback.textContent='Email settings removed.';}
+  catch(error){emailFeedback.textContent=error.message;}
+};
+loadEmailSettings();
 </script></html>

@@ -85,6 +85,7 @@ class OnboardingTests(unittest.TestCase):
             self.assertEqual(report['events'][0]['status'],'ready')
             profile=json.loads(Path(self.engine().state['jobs'][DOC]['profile']).read_text())
             self.assertEqual(profile['x4_filename'],book['filename'])
+            self.assertEqual(profile['title'],book['title'])
             self.assertEqual(profile['crosspoint_document'],md5(book['filename'].encode()).hexdigest())
         finally:self.source.close()
 

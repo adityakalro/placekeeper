@@ -1,8 +1,7 @@
 """EPUB sources shared by discovery adapters."""
 from contextlib import ExitStack
 from pathlib import Path
-import shutil
-from .storage import records
+from .storage import records, book_path
 
 class LibrarySource:
     def __init__(self, root, readest_auth=None):
@@ -28,9 +27,6 @@ class LibrarySource:
     def download(self, book, directory):
         if not book.get('local'):
             return self.remote.download(book,directory)
-        directory=Path(directory);directory.mkdir(mode=0o700,parents=True,exist_ok=True)
-        target=directory/(book['id']+'.epub')
-        shutil.copyfile(self.root/'library'/book['id']/'book.epub',target)
-        return target
+        return book_path(self.root,book['id'])
     def close(self):
         self.stack.close()

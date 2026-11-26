@@ -21,7 +21,7 @@ def validate_books(root, profiles):
         cached = {}
     with closing(Libby(root/'libby-device.json')) as libby:
         for profile in profiles:
-            title = profile['x4_filename'].removesuffix('.epub')
+            title = profile.get('title') or profile['x4_filename'].removesuffix('.epub')
             epub = Path(profile['files']['epub']['path'])
             try:
                 loan = libby.match(title, epub)

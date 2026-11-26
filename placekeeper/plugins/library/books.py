@@ -1,6 +1,6 @@
 """Discover EPUBs shared by CrossPoint and Libby without a Kindle map."""
 from contextlib import closing
-from hashlib import md5
+from hashlib import md5, sha256
 import json
 from pathlib import Path
 
@@ -9,6 +9,7 @@ from placekeeper.plugins.contracts import Book
 from placekeeper.plugins.kindle.loan_discovery import MetadataIndex, active_loans, loan_authors, x4_loans
 from placekeeper.storage import file_sha256, private_json
 from placekeeper.plugins.library.source import LibrarySource
+from .storage import book_path
 
 
 def discover(root, connected):
@@ -27,7 +28,7 @@ def discover(root, connected):
             matches = index.find(book['title'], [book.get('author')])
             if len(matches) != 1:
                 continue
-            epub = root/'reader-books'/(book['id']+'.epub')
+            epub = book_path(root,book['id']) if book.get('local') else root/'reader-books'/(book['id']+'.epub')
             old = previous.get(book['id'], {})
             fingerprint = file_sha256(epub) if epub.is_file() else None
             if fingerprint is None or fingerprint != old.get('sha256'):
@@ -52,9 +53,10 @@ def books(root):
     if (root/'amazon-device.json').exists() and kindle.exists():
         for entry in json.loads(kindle.read_text())['profiles']:
             try:
-                profile = json.loads(Path(entry['path']).read_text())
+                raw=Path(entry['path']).read_bytes()
+                profile = json.loads(raw)
                 epub = profile['files']['epub']
-                if (file_sha256(entry['path']) == entry['sha256']
+                if (sha256(raw).hexdigest() == entry['sha256']
                         and file_sha256(epub['path']) == epub['sha256']):
                     mapped.add(epub['sha256'])
             except (OSError, ValueError, KeyError):

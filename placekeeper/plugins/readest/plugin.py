@@ -1,6 +1,5 @@
 """Readest content-provider registration."""
 from placekeeper.plugins.contracts import Plugin
-from placekeeper.plugins.lazy import deferred
 
 FILE = 'readest-device.json'
 

@@ -79,7 +79,7 @@ def books(root):
             epub = Path(profile['files']['epub']['path'])
             if not epub.is_absolute():
                 epub = path.resolve().parent.parent / epub
-            title = profile.get('x4_filename', epub.name).removesuffix('.epub')
+            title = profile.get('title') or profile.get('x4_filename', epub.name).removesuffix('.epub')
             kind = profile.get('kind', 'PDOC')
             names = ('epub', 'chapters') if profile.get('schema_version') == 3 else ('epub', 'content', 'locations')
             edition = ":".join(profile['files'][name]['sha256'] for name in names)

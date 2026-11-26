@@ -224,3 +224,32 @@ Kindle personal documents still need to be sent through Send to Kindle separatel
 Existing Readest connections and maps continue to work; disconnecting Readest does
 not delete uploaded EPUBs. For existing X4 books, downloading an uploaded copy with
 its new filename creates a separate X4 progress identity, so sync the new copy once.
+
+### Send an uploaded EPUB to Kindle
+
+In **Setup → Send to Kindle email**, save your SMTP server, port, TLS mode,
+username/app password, approved sender email, and Kindle's `@kindle.com` address.
+Use TLS on port 465 or STARTTLS on port 587 as required by your provider.
+Add the sender to Amazon's **Approved Personal Document Email List** and enable
+**Personal Document Archiving** if you want the resulting document discovered
+and mapped by Placekeeper. Amazon may require an email verification step.
+
+Uploading does not send anything. In **EPUB library**, press **Send to Kindle**
+next to the book. The email attachment retains the EPUB filename; email delivery
+supports EPUBs up to 20 MiB (your provider may impose a lower limit).
+**Email sent** means the SMTP server accepted the message, not that Amazon has
+finished processing it. Kindle library discovery remains a separate job.
+
+Credentials are stored in `<data-root>/kindle-email.json`, mode 0600, and are
+never returned to the browser. A blank password preserves the saved password.
+Removing email settings removes the credentials but preserves delivery history.
+`kindle-email-deliveries.json` prevents sending the same EPUB fingerprint twice
+to the same Kindle address, including after restarting or re-uploading it.
+Explicit SMTP rejections can be retried by pressing the button again. A crash
+or lost delivery acknowledgement leaves the result uncertain and blocks resends;
+check Kindle and your email provider before manually reviewing that ledger.
+No scheduled job sends or retries email.
+
+Email delivery runs in a short-lived process and exits after each button action,
+so attachment buffers are not retained in the web server. A send has a three-minute
+deadline; an interrupted or uncertain send remains protected against duplicates.

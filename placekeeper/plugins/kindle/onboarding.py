@@ -73,8 +73,14 @@ def text_evidence(source, target, sample_count=120):
 
 
 def evaluate_indexes(e, k):
-    forward=text_evidence(e,k);reverse=text_evidence(k,e)
     identical=e.text==k.text
+    if identical and len(e.text)>=200:
+        # Full equality proves positional alignment, including repeated prose.
+        evidence={'samples':0,'matched':0,'coverage':1.0,'length_ratio':1.0,
+                  'adequate':True,'method':'full_normalized_text_equality'}
+        return {'epub_to_kfx':dict(evidence),'kfx_to_epub':dict(evidence),
+                'accepted':True,'normalized_text_identical':True}
+    forward=text_evidence(e,k);reverse=text_evidence(k,e)
     return {'epub_to_kfx':forward,'kfx_to_epub':reverse,
             'accepted':identical and forward['adequate'] and reverse['adequate'],
             'normalized_text_identical':identical}
@@ -193,7 +199,7 @@ class Onboarder:
                      for name, path in [('epub',epub),('chapters',chapters)]}
             profile_path = directory/'profile.json'
             private_json(profile_path, {'schema_version':3, 'kind':'PDOC', 'document':doc,
-                'readest_id':candidate['id'], 'x4_filename':filename, 'files':files,
+                'title':candidate['title'], 'readest_id':candidate['id'], 'x4_filename':filename, 'files':files,
                 'crosspoint_document':hashlib.md5(filename.encode()).hexdigest(),
                 'mapping_method':'approximate chapter fractions'})
             return {'status':'ready', 'profile':str(profile_path), 'readest_id':candidate['id'],
@@ -218,7 +224,7 @@ class Onboarder:
             ('epub',epub),('content',content),('locations',locations))}
         profile={'schema_version':2,'document':doc,
             'crosspoint_document':hashlib.md5(filename.encode()).hexdigest(),
-            'readest_id':candidate['id'],'x4_filename':filename,
+            'title':candidate['title'],'readest_id':candidate['id'],'x4_filename':filename,
             'crosspoint_identity_method':'filename MD5; same mode confirmed on the X4',
             'files':files,'validation':{'text_match':evidence,'round_trip':validation},
             'bridge':{'model':'legacy_sidecar_location_bucket_150','precision':'location bucket',
@@ -254,7 +260,7 @@ class Onboarder:
         private_json(profile, {
             'schema_version': 3, 'kind': 'EBOK', 'document': document['document'],
             'crosspoint_document': hashlib.md5(filename.encode()).hexdigest(),
-            'readest_id': candidate['id'], 'x4_filename': filename, 'files': files,
+            'title':candidate['title'], 'readest_id': candidate['id'], 'x4_filename': filename, 'files': files,
         })
         return {'status': 'ready', 'profile': str(profile), 'readest_id': candidate['id'],
                 'profile_sha256': file_hash(profile), 'files': files, 'catalog_signature': signature}

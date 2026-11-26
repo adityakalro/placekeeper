@@ -94,3 +94,54 @@ labels, readiness, and discovery availability. For four plugins, this reduces
 connection checks from 12 to 4 per request without caching connections between
 requests. Readest pagination retains fixed-size page hashes instead of full JSON
 page strings when checking for repeated pages.
+
+## EPUB library and email worker review
+
+Send to Kindle now uses the existing short-lived worker protocol with an `email`
+job, a three-minute process deadline, and the persistent delivery lock/ledger.
+Only the EPUB ID and data-root path cross the command line; SMTP credentials are
+read privately inside the worker. Settings and delivery status do not import
+SMTP, TLS, or the mapping/service clients. The worker does not load the plugin
+registry or progress engine. No automatic retries were added to email delivery.
+
+Offline measurements on DietPi, using an 8 MiB synthetic EPUB and fake SMTP that
+serializes the MIME message but never opens a network connection:
+
+| Parent process | In-process email | Email worker |
+| --- | ---: | ---: |
+| RSS before send | 21.61 MiB | 21.60 MiB |
+| RSS after send | 47.31 MiB | 21.81 MiB |
+| Peak RSS | 81.94 MiB | 25.26 MiB |
+| Elapsed | 3.273 s | 3.776 s |
+
+These are parent-only metrics, not combined parent/worker memory. The worker
+still needs MIME attachment memory during delivery; it is released when the
+process exits. The benchmark is synthetic and does not measure SMTP latency.
+
+For 2,097,152 characters of identical normalized text, the original pair of
+120-sample context checks took 0.439594 s; complete text equality took 0.002664 s
+(165x faster for this verification step). Equal-text mappings now translate by
+normalized character index, including repeated prose. Differing text retains
+context matching and chapter fallback. Text extraction/index construction time
+is not included in that speedup. Fingerprint checks and progress-write journals
+remain unchanged.
+
+Other reviewed changes: single-book downloads and email sends read one metadata
+record instead of scanning the library; local EPUB discovery reuses the original
+uploaded file rather than copying it into two caches; pair discovery reads each
+Kindle profile once instead of once for JSON plus again for its checksum. Existing
+cache files remain intact because older profiles may still reference them. New
+profiles preserve the real title separately from the X4 download filename, so
+its edition suffix cannot prevent Libby title matching.
+
+Reproduce without account credentials or external mail:
+
+```sh
+.venv/bin/python -m tests.benchmark_efficiency
+```
+
+Review covered the web handlers/templates, scheduler and health state, worker
+lifecycle, sync planner/journals, mappings, all service plugins, and installation
+and relocation paths. Safety-related rereads before writes and per-book file
+verification were retained rather than traded for unchecked caches. No new
+third-party dependency or permanent worker was introduced.

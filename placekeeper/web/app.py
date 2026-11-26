@@ -291,14 +291,14 @@ def handler_for(jobs,hosts,networks):
                 from placekeeper.plugins.library.catalog import feed
                 self.send(200,feed(jobs.root),'application/atom+xml;profile=opds-catalog;kind=acquisition')
             elif self.path.startswith('/epubs/'):
-                from placekeeper.plugins.library.storage import book_path, records
+                from placekeeper.plugins.library.storage import book_path, record
                 parts=urlsplit(self.path).path.split('/')
                 try:
                     if len(parts)!=4:raise ValueError('Unknown EPUB.')
                     path=book_path(jobs.root,parts[2])
                     if not path.is_file():raise ValueError('Unknown EPUB.')
-                    book=next(b for b in records(jobs.root) if b['id']==parts[2])
-                except (ValueError,StopIteration):self.send(404,{'error':'Not found'});return
+                    book=record(jobs.root,parts[2])
+                except (ValueError,FileNotFoundError):self.send(404,{'error':'Not found'});return
                 self.send_response(200)
                 self.send_header('Content-Type','application/epub+zip')
                 self.send_header('Content-Length',str(path.stat().st_size))
@@ -309,7 +309,12 @@ def handler_for(jobs,hosts,networks):
                 with path.open('rb') as source:shutil.copyfileobj(source,self.wfile,65536)
             elif self.path=='/api/library':
                 from placekeeper.plugins.library.storage import records
-                self.send(200,{'books':records(jobs.root)})
+                books=records(jobs.root)
+                from placekeeper.plugins.kindle.email_delivery import library_status
+                self.send(200,{'books':books,'kindle_email':library_status(jobs.root,books)})
+            elif self.path=='/api/kindle-email':
+                from placekeeper.plugins.kindle.email_delivery import settings
+                self.send(200,settings(jobs.root))
             elif self.path=='/api/status':self.send(200,jobs.status())
             elif self.path=='/api/health':
                 jobs.check_health()
@@ -340,7 +345,21 @@ def handler_for(jobs,hosts,networks):
                 data=json.loads(self.rfile.read(size))
                 if not isinstance(data,dict):raise ValueError('Invalid request')
             except (ValueError,UnicodeError):self.send(400,{'error':'Invalid request'});return
-            if self.path=='/api/connect':
+            if self.path in ('/api/kindle-email','/api/library/send-kindle'):
+                from placekeeper.plugins.kindle.email_delivery import configure
+                if not jobs.lock.acquire(blocking=False):
+                    self.send(409,{'error':'Wait for the current job to finish.'});return
+                try:
+                    if self.path=='/api/kindle-email':result=configure(jobs.root,data)
+                    else:
+                        result=run_worker(jobs.root,'email',lambda _:None,book_id=data.get('id',''),timeout=180)
+                        if 'error' in result:raise ValueError(result['error'])
+                    self.send(200,result)
+                except ValueError as e:self.send(400,{'error':str(e)})
+                except ReadFailure as e:self.send(503,{'error':str(e)})
+                except OSError:self.send(500,{'error':'Could not save email delivery state. Check installation storage.'})
+                finally:jobs.lock.release()
+            elif self.path=='/api/connect':
                 try:jobs.connect(str(data.get('username','')).strip(),str(data.get('password','')),data.get('remember') is True)
                 except ValueError as e:self.send(400,{'error':str(e)});return
                 self.send(200,{'connected':True})

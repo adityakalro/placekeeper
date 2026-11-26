@@ -44,7 +44,7 @@
   <p id="uploadFeedback" role="status" class="meta"></p>
   <p id="libraryMessage" class="muted" role="status">Loading your EPUBs…</p>
   <table id="libraryTable" class="sync-results" aria-label="Uploaded EPUBs" hidden>
-    <thead><tr><th scope="col">Book</th><th scope="col">Download</th></tr></thead>
+    <thead><tr><th scope="col">Book</th><th scope="col">Actions</th></tr></thead>
     <tbody id="libraryBooks"></tbody>
   </table>
   <p class="muted">X4 catalog address: <a id="opdsUrl" href="/opds">/opds</a>. Add it under Settings → OPDS Servers on your X4. Downloaded books must keep their filename.</p>
@@ -274,7 +274,22 @@ async function loadLibrary(){
       const link=document.createElement('a');link.className='primary secondary';link.textContent='Download';
       link.href='/epubs/'+encodeURIComponent(book.id)+'/'+encodeURIComponent(book.filename);
       link.download=book.filename;link.setAttribute('aria-label','Download '+book.title);
-      action.append(link);row.append(title,action);body.append(row);
+      action.append(link);
+      const delivery=result.kindle_email||{},state=(delivery.deliveries||{})[book.id]||'not_sent';
+      const send=document.createElement('button');send.className='primary secondary';
+      send.textContent=state==='sent'?'Email sent':(state==='uncertain'||state==='sending')?'Check delivery':'Send to Kindle';
+      send.disabled=!delivery.configured||['sent','sending','uncertain'].includes(state);
+      send.title=!delivery.configured?'Configure email delivery in Setup':state==='sent'?'Accepted by email server; Amazon delivery not confirmed':state==='uncertain'||state==='sending'?'Delivery uncertain; resends blocked to prevent duplicates':'';
+      send.addEventListener('click',async()=>{
+        send.disabled=true;send.textContent='Sending…';
+        const feedback=document.getElementById('uploadFeedback');
+        try{
+          const response=await fetch('/api/library/send-kindle',{method:'POST',headers:{'Content-Type':'application/json','X-Placekeeper':'CSRF'},body:JSON.stringify({id:book.id})});
+          const outcome=await response.json();if(!response.ok)throw Error(outcome.error||'Could not send EPUB.');
+          feedback.textContent=outcome.message;
+        }catch(error){feedback.textContent=error.message;}finally{await loadLibrary();}
+      });
+      action.append(send);row.append(title,action);body.append(row);
     }
     table.hidden=result.books.length===0;
     message.textContent=result.books.length?'On iPhone, choose Download, then save the EPUB to Files. Keep its filename when uploading it to the X4.':'No EPUBs uploaded yet.';

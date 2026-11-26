@@ -2,12 +2,27 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 from zipfile import ZipFile
 
 from placekeeper.mapping.text import Mapper, TextIndex, epub_index, epub_position_details
 
 
 class MappingTests(unittest.TestCase):
+    def test_identical_repeated_text_maps_by_position_without_context_scans(self):
+        from placekeeper.plugins.kindle.onboarding import evaluate_indexes
+        first=TextIndex.make([('abc'*300,lambda n:f'/body/p[1]/text()[1].{n}')])
+        second=TextIndex.make([('abc'*300,lambda n:50+n)])
+        with tempfile.TemporaryDirectory() as directory:
+            locations=Path(directory)/'locations.json'
+            locations.write_text(json.dumps([{'location':i+1,'position':50+i*150} for i in range(6)]))
+            with patch.object(TextIndex,'unique_match',side_effect=AssertionError('Unnecessary full-text scan')):
+                evidence=evaluate_indexes(first,second)
+                self.assertTrue(evidence['accepted'])
+                mapper=Mapper(None,None,locations,epub_text=first,kfx_text=second)
+                self.assertEqual(mapper.from_xpointer(first.coordinates[150])['kindle_location'],2)
+                self.assertEqual(mapper.from_sidecar(150)['xpointer'],first.coordinates[150])
+
     def test_compact_xpath_coordinates_lookup_and_whitespace_snap(self):
         index=TextIndex.make([(' A ﬁ',lambda o:f'/body/p[1]/text()[1].{o}'),
                               ('tail',lambda o:f'/body/p[1]/text()[2].{o}')])

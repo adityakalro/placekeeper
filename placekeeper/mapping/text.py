@@ -203,6 +203,7 @@ class Mapper:
     def __init__(self, epub, content, locations, *, epub_text=None, kfx_text=None):
         self.epub = epub_index(epub) if epub_text is None else epub_text
         self.kfx = kfx_index(content) if kfx_text is None else kfx_text
+        self.identical = self.epub.text == self.kfx.text
         self.locations = json.loads(Path(locations).read_text())
         self.starts = [r['position'] for r in self.locations]
         if self.starts != sorted(self.starts):
@@ -217,7 +218,7 @@ class Mapper:
             # Whitespace may have been removed. Snap forward within this text
             # node only, never silently switch to a different paragraph.
             index=self.epub.coordinates.at_or_after(xpointer)
-        matched = self.epub.unique_match(self.kfx, index)
+        matched = index if self.identical else self.epub.unique_match(self.kfx, index)
         pid = self.kfx.coordinates[matched]
         location = bisect_right(self.starts, pid)
         if not location:
@@ -240,7 +241,7 @@ class Mapper:
         index = bisect_right(self.kfx.coordinates, pid-1)
         if index >= len(self.kfx.coordinates):
             raise ValueError('No text at this location')
-        matched = self.kfx.unique_match(self.epub, index)
+        matched = index if self.identical else self.kfx.unique_match(self.epub, index)
         return {'sidecar_position': position, 'kindle_location': location,
                 'xpointer': self.epub.coordinates[matched],
                 'precision': 'start of location bucket'}

@@ -12,6 +12,13 @@ import json
 MAX_UPLOAD=64*1024*1024
 MAX_EXPANDED=256*1024*1024
 
+def record(root,key):
+    # Validate the identity before constructing paths; one-book operations must
+    # not scan or deserialize every metadata file in the library.
+    book_path(root,key)
+    return json.loads((Path(root)/'library'/key/'metadata.json').read_text())
+
+
 def records(root):
     directory=Path(root)/'library'
     if not directory.exists():return []
@@ -64,5 +71,5 @@ def save(root, stream, size):
         return book
 
 def book_path(root,key):
-    if not re.fullmatch('[a-f0-9]{32}',key):raise ValueError('Unknown EPUB.')
+    if not isinstance(key,str) or not re.fullmatch('[a-f0-9]{32}',key):raise ValueError('Unknown EPUB.')
     return Path(root)/'library'/key/'book.epub'
