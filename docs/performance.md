@@ -80,3 +80,17 @@ browser-logic tests use Node's built-in test runner with no additional packages:
 ```sh
 node --test tests/test_web_polling.js
 ```
+
+## Metadata and status-request efficiency
+
+Book-status metadata is now published once per completed catalog job, and only
+if it changed. A synthetic 100-book metadata-only job previously replaced the
+status file 100 times on both its first and unchanged subsequent run. It now
+replaces it once initially and zero times when unchanged. Progress journals still
+save immediately before and after remote writes; their safety checks are unchanged.
+
+Each status request now takes one connection snapshot and reuses it for service
+labels, readiness, and discovery availability. For four plugins, this reduces
+connection checks from 12 to 4 per request without caching connections between
+requests. Readest pagination retains fixed-size page hashes instead of full JSON
+page strings when checking for repeated pages.

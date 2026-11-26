@@ -5,6 +5,14 @@
   <p class="muted"><span id="schedule">Checking automatic sync…</span> <a href="/setup">Manage in Setup</a></p>
   <p id="phase" role="status" aria-live="polite">Checking connection…</p>
 </section>
+<section class="card" aria-labelledby="healthTitle">
+  <h2 id="healthTitle">Installation health</h2>
+  <p id="healthSummary" role="status">Checking health…</p>
+  <ul id="healthIssues" class="muted" hidden></ul>
+  <p class="muted" id="healthJobs"></p>
+  <details><summary>Recent alerts</summary><ul id="healthAlerts" class="muted"></ul></details>
+  <p class="meta">Alerts are shown here only. <a href="/setup">Configure health and retries</a></p>
+</section>
 <section class="card" aria-labelledby="resultTitle">
   <h2 id="resultTitle">Last progress sync</h2>
   <p class="empty" id="resultMessage">No progress sync has run yet.</p>
@@ -22,6 +30,10 @@
     <thead><tr><th scope="col">Book</th><th scope="col">Sync status</th></tr></thead>
     <tbody id="bookControls"></tbody>
   </table>
+  <details id="removedSection" hidden><summary>Removed books</summary>
+    <p class="muted">Removed from Placekeeper only. Your library books and saved reading progress are kept. Restore a book to include it again.</p>
+    <ul id="removedBooks" class="muted"></ul>
+  </details>
   <p id="bookFeedback" role="status" class="meta"></p>
 </section>
 <section class="card">
@@ -30,7 +42,9 @@
   <button id="discover" class="primary secondary" disabled>Find new books</button>
   <p class="muted" id="discoverySchedule"></p>
   <p class="meta" id="discoveryResult" role="status">No discovery run yet.</p>
-  <ul id="discoveryMatches" class="muted" hidden></ul>
+  <details id="discoveryDetails" hidden><summary id="discoveryToggle">Discovered books</summary>
+    <ul id="discoveryMatches" class="muted" hidden></ul>
+  </details>
 </section>
 <section class="card steps"><div><strong>Before you sync</strong><p>Sync your current reader so its latest position reaches the cloud.</p></div><div><strong>On your other reader</strong><p>Sync the destination reader and reopen the book to pick up the update.</p></div></section><footer>Home network or WireGuard VPN</footer></main>
 <script nonce="NONCE">
@@ -43,12 +57,33 @@ function changed(section,value){
   rendered.set(section,signature);return true;
 }
 async function call(path,body){const r=await fetch(path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json','X-Placekeeper':csrf}:{},body:body?JSON.stringify(body):undefined,cache:'no-store'});const d=await r.json();if(!r.ok)throw Error(d.error||'Connection failed');return d;}
+function removalButton(book,removed,running){
+  const button=document.createElement('button');
+  button.type='button';button.className='primary secondary';button.disabled=running;
+  button.textContent=removed?'Remove':'Restore';
+  button.setAttribute('aria-label',(removed?'Remove from sync: ':'Restore: ')+book.title);
+  button.addEventListener('click',async()=>{
+    button.disabled=true;
+    try{await call('/api/book-removed',{key:book.key,removed});$('bookFeedback').textContent=(removed?'Removed from sync: ':'Restored: ')+book.title+'.';}
+    catch(e){$('bookFeedback').textContent=e.message;}
+    finally{button.disabled=false;button.blur();await refresh();}
+  });
+  return button;
+}
 function renderBooks(s){
   const list=$('bookControls');
-  if(list.contains(document.activeElement))return;
-  if(!changed('books',[s.books||[],Boolean(s.running)]))return;
+  if(list.contains(document.activeElement)||$('removedBooks').contains(document.activeElement))return;
+  if(!changed('books',[s.books||[],s.removed_books||[],Boolean(s.running)]))return;
   list.replaceChildren();
-  const books=s.books||[];
+  const books=s.books||[],removed=s.removed_books||[];
+  $('booksEmpty').textContent=removed.length?'No active books. Restore a removed book below to sync it again.':'Run Sync now to list your mapped books.';
+  $('removedSection').hidden=removed.length===0;
+  $('removedBooks').replaceChildren();
+  for(const book of removed){
+    const item=document.createElement('li');item.className='actions';
+    const title=document.createElement('span');title.textContent=book.title;
+    item.append(title,removalButton(book,false,s.running));$('removedBooks').append(item);
+  }
   $('booksEmpty').hidden=books.length>0;
   $('booksTable').hidden=books.length===0;
   const labels={automatic:'Automatic',reading:'Reading',not_started:'Not started',finished:'Finished',paused:'Paused'};
@@ -68,7 +103,8 @@ function renderBooks(s){
       catch(e){select.value=book.mode;$('bookFeedback').textContent=e.message;}
       finally{select.disabled=false;select.blur();await refresh();}
     });
-    cell.append(select);
+    const actions=document.createElement('div');actions.className='book-actions';
+    actions.append(select,removalButton(book,true,s.running));cell.append(actions);
     if(book.mode==='automatic'){
       const detail=document.createElement('div');detail.className='meta';
       detail.textContent='Last detected: '+(labels[book.reading_status]||'Not checked');cell.append(detail);
@@ -77,6 +113,25 @@ function renderBooks(s){
 }
 function render(s){
   renderBooks(s);
+  if(s.health&&changed('health',s.health)){
+    const health=s.health;
+    $('healthSummary').textContent=health.status==='healthy'?'Healthy':'Needs attention';
+    $('healthSummary').classList.toggle('error',health.status!=='healthy');
+    $('healthIssues').replaceChildren();$('healthIssues').hidden=!health.issues.length;
+    for(const message of health.issues){const item=document.createElement('li');item.textContent=message;$('healthIssues').append(item);}
+    $('healthJobs').textContent=Object.entries(health.jobs).map(([job,state])=>{
+      const label=job==='progress'?'Progress sync':'Discovery';
+      return label+': '+(state.active?'running':state.enabled?'scheduled':'automatic schedule off')+
+        (state.last_success?' · last success '+new Date(state.last_success*1000).toLocaleString():' · no successful run recorded')+
+        (state.retry_at?' · retry '+(state.retry_count+1)+' at '+new Date(state.retry_at*1000).toLocaleString():'')+
+        (state.retry_exhausted?' · retry limit reached; waiting for the next scheduled run':'');
+    }).join(' | ');
+    $('healthAlerts').replaceChildren();
+    for(const alert of [...health.alerts].reverse()){
+      const item=document.createElement('li');item.textContent=(alert.resolved_at?'Recovered · ':'Attention · ')+alert.message+' · '+new Date((alert.resolved_at||alert.opened_at)*1000).toLocaleString();$('healthAlerts').append(item);
+    }
+    if(!health.alerts.length){const item=document.createElement('li');item.textContent='No alerts recorded.';$('healthAlerts').append(item);}
+  }
   if(changed('controls',[s.connected,s.running,s.can_discover,s.running_job,s.phase,s.schedule_enabled,s.discovery_enabled])){
   $('setupNotice').hidden=s.connected;
   $('sync').disabled=!s.connected||s.running;
@@ -90,10 +145,10 @@ function render(s){
   $('discoverySchedule').textContent=s.discovery_enabled?'Automatic discovery runs every 6 hours.':'Automatic discovery is off.';
   }
   const last=s.last;
-  if(last&&changed('last',[last,s.services])){
+  if(last&&changed('last',[last,s.services,Boolean(s.removed_books?.length)])){
     $('resultTitle').textContent=last.status==='complete'?'Sync complete':last.status==='needs_attention'?'Some books need attention':'Sync did not finish';
     const books=last.books||[];
-    const message=last.message||(last.books?.length===0?'No mapped books to sync. Use Find new books to look for matches.':'');
+    const message=last.message||(last.books?.length===0?(s.removed_books?.length?'No active books to sync. Restore a removed book below.':'No mapped books to sync. Use Find new books to look for matches.'):'');
     $('resultMessage').textContent=message;
     $('resultMessage').hidden=!message;
     $('resultMessage').classList.toggle('error',Boolean(last.message));
@@ -146,6 +201,8 @@ function render(s){
     const list=$('discoveryMatches');
     list.replaceChildren();
     list.hidden=!matches?.length;
+    $('discoveryDetails').hidden=!matches?.length;
+    $('discoveryToggle').textContent='Discovered books ('+(matches?.length||0)+')';
     for(const match of matches||[]){
       const item=document.createElement('li');
       const detail={open_libby:'Chapter map verified. Open the audiobook in Libby, play briefly, and sync your shelf.',

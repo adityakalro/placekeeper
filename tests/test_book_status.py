@@ -3,13 +3,15 @@ from contextlib import contextmanager
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from placekeeper.plugins.contracts import Book, Observation, Plugin
+from placekeeper.errors import UnsupportedMapping
 from placekeeper.sync import book_status
 from placekeeper.sync.engine import execute, sync_book
 from placekeeper.sync.job import run_books
 from placekeeper.web.app import Jobs
+from placekeeper.storage import private_json
 
 
 class Reader:
@@ -32,6 +34,70 @@ class Reader:
 
 
 class BookStatusTests(unittest.TestCase):
+    def test_removed_book_stays_excluded_after_rediscovery_and_can_be_restored(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            private_json(root/'book-status.json',{'key':{'key':'key','title':'Title','mode':'reading','reading_status':'reading'}})
+            journal=root/'progress/journal.json'
+            private_json(journal,{'receipts':{'reader':{'position':10}}})
+            original=journal.read_bytes()
+            load=Mock(return_value=object())
+            book=Book('key','Title','edition',load_mapper=load)
+            plugin=Plugin('catalog','Catalog',(),books=lambda _:iter([book]))
+            jobs=Jobs(root,plugins={'catalog':plugin})
+            jobs.set_book_removed('key',True)
+            self.assertEqual(jobs.status()['books'],[])
+            self.assertEqual(jobs.status()['removed_books'][0]['title'],'Title')
+            for _ in range(2):
+                self.assertEqual(run_books(root,{'catalog':plugin},lambda _:None),[])
+            load.assert_not_called()
+            self.assertEqual(journal.read_bytes(),original)
+            self.assertTrue(Jobs(root,plugins={'catalog':plugin}).status()['removed_books'])
+            with self.assertRaises(ValueError):jobs.set_book_status('key','automatic')
+            for key,value in [('missing',True),('key','true')]:
+                with self.assertRaises(ValueError):jobs.set_book_removed(key,value)
+            jobs.lock.acquire()
+            try:
+                with self.assertRaises(ValueError):jobs.set_book_removed('key',False)
+            finally:jobs.lock.release()
+            jobs.set_book_removed('key',False)
+            self.assertEqual(jobs.status()['books'][0]['mode'],'reading')
+            self.assertEqual(jobs.status()['removed_books'],[])
+            result=run_books(root,{'catalog':plugin},lambda _:None)
+            self.assertEqual(result[0]['title'],'Title')
+            load.assert_called_once()
+            self.assertEqual(journal.read_bytes(),original)
+
+    def test_missing_progress_does_not_claim_the_book_is_being_read(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            plugin=Plugin('catalog','Catalog',(),books=lambda _:iter([Book('key','Title','edition')]))
+            run_books(root,{'catalog':plugin},lambda _:None)
+            self.assertEqual(book_status.load(root)['key']['reading_status'],'unknown')
+
+    def test_status_metadata_is_written_once_and_only_when_changed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            plugin=Plugin('catalog','Catalog',(),books=lambda _:iter([
+                Book(str(i),'Book '+str(i),'edition') for i in range(3)]))
+            with patch('placekeeper.sync.job.private_json',wraps=private_json) as save:
+                run_books(root,{'catalog':plugin},lambda _:None)
+                self.assertEqual(save.call_count,1)
+                save.reset_mock()
+                run_books(root,{'catalog':plugin},lambda _:None)
+                save.assert_not_called()
+
+    def test_unmapped_reader_prevents_false_not_started_detection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            unread=Reader(0,0)
+            unmapped=Mock();unmapped.read.side_effect=UnsupportedMapping('Outside mapped chapters')
+            result=execute({'unread':unread,'unmapped':unmapped},{'receipts':{}},root/'state.json',mode='automatic')
+            self.assertEqual(result['status'],'skipped')
+            self.assertEqual(unread.writes,[])
+            result=execute({'unread':unread},{'receipts':{}},root/'state.json',mode='automatic',skipped={'unmapped':'Outside mapped chapters'})
+            self.assertEqual(result['status'],'skipped')
+
     def test_detection_considers_all_readers_and_unknown_fractions(self):
         def detect(*values):
             return book_status.automatic_status({str(i): Observation(i, i, fraction=f)

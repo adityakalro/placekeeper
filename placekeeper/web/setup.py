@@ -14,17 +14,18 @@ class Connections:
     def connected(self):
         return {key: plugin for key, plugin in self.plugins.items() if plugin.connected(self.root)}
 
-    def status(self):
+    def status(self, services=None):
+        services = self.connected() if services is None else services
         return {
             key: {'label': plugin.label, 'description': plugin.description, 'actions': plugin.actions,
-                  'connected': plugin.connected(self.root),
-                  'can_disconnect': any((self.root/file).exists() for file in plugin.files)
+                  'connected': key in services,
+                  'can_disconnect': key in services or any((self.root/file).exists() for file in plugin.files)
                   or (self.pending/(key + '.json')).exists()}
             for key, plugin in self.plugins.items()
         }
 
-    def ready(self):
-        services = self.connected()
+    def ready(self, services=None):
+        services = self.connected() if services is None else services
         return (sum(plugin.reader is not None for plugin in services.values()) >= 2
                 and any(plugin.catalog_ready(services) for plugin in services.values()))
 

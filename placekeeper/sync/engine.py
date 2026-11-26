@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from time import time
 
-from placekeeper.errors import MissingProgress, ReadFailure, UnsupportedMapping
+from placekeeper.errors import MissingProgress, NeedsRecovery, ReadFailure, UnsupportedMapping
 from placekeeper.storage import private_json
 from placekeeper.sync.planner import plan
 from placekeeper.sync.book_status import automatic_status, skipped as paused_result
@@ -49,7 +49,7 @@ def reconcile(state, observations):
     key = pending['device']
     current = observations.get(key)
     if current is None or current.native == pending['before']['position']:
-        raise ReadFailure('An earlier write is unconfirmed. Check the destination and use the recovery command before retrying.')
+        raise NeedsRecovery('An earlier write is unconfirmed. Check the destination and use the recovery command before retrying.')
     if current.native == pending['target']:
         state['receipts'][key] = receipt(current)
     state.pop('pending')
@@ -58,7 +58,7 @@ def reconcile(state, observations):
 def execute(readers, state, path, dry_run=False, *, skipped=None, mode='reading'):
     with ThreadPoolExecutor(max_workers=3) as pool:
         skipped = {} if skipped is None else skipped
-        mapping_skips = {}
+        mapping_skips = dict(skipped)
         result = execute_plan(readers, state, path, dry_run, pool, mapping_skips, mode)
     skipped.update(mapping_skips)
     if skipped:
@@ -78,6 +78,8 @@ def execute_plan(readers, state, path, dry_run, pool, mapping_skips, mode):
                 private_json(path, state)
         if mode == 'automatic':
             status = automatic_status(positions)
+            if status == 'not_started' and mapping_skips:
+                status = 'reading'
             if status != 'reading':
                 return paused_result(status)
         source, targets, message = plan(readers, positions, state['receipts'], state.get('handoff'), mapping_skips)
@@ -125,7 +127,8 @@ def execute_plan(readers, state, path, dry_run, pool, mapping_skips, mode):
                 if writes else 'The selected position required no supported updates.'}
     except Exception as error:
         return {'status': 'unconfirmed' if writes else 'error', 'writes': writes, 'outcomes': outcomes,
-                'message': str(error) if isinstance(error, ReadFailure) else 'Could not complete this book’s sync.'}
+                'message': str(error) if isinstance(error, ReadFailure) else 'Could not complete this book’s sync.',
+                'retryable': not writes and isinstance(error, ReadFailure) and not isinstance(error, NeedsRecovery)}
 
 
 def sync_book(root, book, plugins, dry_run=False, *, mode='automatic'):
@@ -141,7 +144,7 @@ def sync_book(root, book, plugins, dry_run=False, *, mode='automatic'):
         state = book.initial_state() if book.initial_state else {'receipts': {}}
     if state.get('edition', book.edition) != book.edition:
         if state.get('pending'):
-            raise ReadFailure('An unconfirmed write belongs to an earlier edition map.')
+            raise NeedsRecovery('An unconfirmed write belongs to an earlier edition map.')
         state = {'receipts': {}}
     state.update(edition=book.edition, title=book.title)
     if not existing and not dry_run and state.get('pending'):

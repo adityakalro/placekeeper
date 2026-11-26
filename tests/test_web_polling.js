@@ -17,6 +17,7 @@ function page(){
     insertRow(){const row=new Element();this.append(row);return row;}
     insertCell(){return this.insertRow();}
     setAttribute(){}
+    blur(){document.activeElement=null;}
     addEventListener(name,callback){this.listeners[name]=callback;}
     contains(target){return target===this||this.children.some(child=>child.contains(target));}
   }
@@ -69,4 +70,43 @@ test('failed job request restores buttons even when status is unchanged',async()
   await flush();await p.respond(status);await click;
   assert.equal(p.elements.get('sync').disabled,false);
   assert.equal(p.elements.get('discover').disabled,false);
+});
+
+test('health incidents render without replacing unchanged book tables',async()=>{
+  const p=page();await p.respond(status);
+  const before=p.elements.get('bookControls').replacements;
+  p.context.render({...status,health:{status:'needs_attention',issues:['Progress needs attention.'],jobs:{progress:{enabled:true,retry_at:100,retry_count:0}},alerts:[{message:'Test incident',opened_at:90,resolved_at:null}]}});
+  assert.equal(p.elements.get('healthSummary').textContent,'Needs attention');
+  assert.equal(p.elements.get('healthIssues').children[0].textContent,'Progress needs attention.');
+  assert.equal(p.elements.get('bookControls').replacements,before);
+});
+
+test('remove and restore controls update the active and removed lists',async()=>{
+  const p=page();await p.respond(status);
+  const cell=p.elements.get('bookControls').children[0].children[1];
+  const remove=cell.children[0].children[1];
+  assert.equal(remove.textContent,'Remove');
+  const action=remove.listeners.click();await p.respond({saved:true});
+  const removed={...status,books:[],removed_books:status.books.map(book=>({...book,removed:true}))};
+  await p.respond(removed);await action;
+  assert.equal(p.elements.get('bookControls').children.length,0);
+  assert.equal(p.elements.get('removedSection').hidden,false);
+  const restore=p.elements.get('removedBooks').children[0].children[1];
+  const restored=restore.listeners.click();await p.respond({saved:true});await p.respond(status);await restored;
+  assert.equal(p.elements.get('bookControls').children.length,1);
+  assert.equal(p.elements.get('removedSection').hidden,true);
+});
+test('discovery results are collapsible and render does not force them open',async()=>{
+  const markup=fs.readFileSync(require('node:path').join(__dirname,'../placekeeper/web/templates/sync.html'),'utf8');
+  assert.match(markup,/<details id="discoveryDetails" hidden>/);
+  const p=page();await p.respond(status);
+  const details=p.elements.get('discoveryDetails');details.open=true;
+  p.context.render({...status,last_discovery:{discovery:{matches:[{title:'Another',status:'ready'}]}}});
+  assert.equal(details.open,true);
+  assert.equal(details.hidden,false);
+});
+
+test('all removed books show a restore action rather than a discovery prompt',async()=>{
+  const p=page();await p.respond({...status,books:[],removed_books:status.books,last:{status:'complete',books:[]}});
+  assert.match(p.elements.get('resultMessage').textContent,/Restore a removed book/);
 });

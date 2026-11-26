@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 from zipfile import ZipFile
 
 import httpx
-from placekeeper.storage import default_data_root, private_json
+from placekeeper.storage import default_data_root, digest, private_json
 
 ORIGIN = 'https://web.readest.com'
 AUTH = default_data_root()/'readest-device.json'
@@ -73,7 +73,7 @@ class ReadestSource:
             items = self.get('/api/crosspoint/books',params={'page':page,'per_page':50})['items']
             if not isinstance(items,list) or any(not isinstance(i,dict) for i in items):
                 raise ValueError('Readest returned an invalid catalog page')
-            fingerprint=json.dumps(items,sort_keys=True)
+            fingerprint=digest(items)
             if fingerprint in seen:
                 raise ValueError('Readest catalog pagination repeated a page')
             seen.add(fingerprint)

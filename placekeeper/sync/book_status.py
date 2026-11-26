@@ -17,7 +17,17 @@ def save_mode(root, key, mode):
     books = load(root)
     if not isinstance(key, str) or key not in books or mode not in MODES:
         raise ValueError('Choose a known book and a valid reading status.')
+    if books[key].get('removed'):
+        raise ValueError('Restore this book before changing its status.')
     books[key]['mode'] = mode
+    private_json(root/'book-status.json', books)
+
+
+def save_removed(root, key, removed):
+    books = load(root)
+    if not isinstance(key, str) or key not in books or type(removed) is not bool:
+        raise ValueError('Choose a known book to remove or restore.')
+    books[key]['removed'] = removed
     private_json(root/'book-status.json', books)
 
 

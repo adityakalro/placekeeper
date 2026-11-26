@@ -3,7 +3,7 @@ from collections import Counter
 from contextlib import ExitStack
 from dataclasses import replace
 
-from placekeeper.errors import ReadFailure
+from placekeeper.errors import NeedsRecovery, ReadFailure
 from placekeeper.storage import onboarding_lock, private_json
 from placekeeper.sync import book_status
 from placekeeper.sync.engine import sync_book
@@ -38,6 +38,7 @@ def run_books(root, plugins, notify, *, dry_run=False):
 def run_catalogs(root, plugins, readers, notify, dry_run):
     results = []
     statuses = book_status.load(root)
+    statuses_changed = False
     seen = set()
     for key, plugin in plugins.items():
         if not plugin.catalog_ready(plugins):
@@ -50,13 +51,17 @@ def run_catalogs(root, plugins, readers, notify, dry_run):
                 if book.key in seen:
                     continue
                 seen.add(book.key)
+                if statuses.get(book.key, {}).get('removed'):
+                    book.release()
+                    del book
+                    continue
                 notify('Syncing ' + book.title + '…')
                 try:
                     result = sync_book(root, book, readers, dry_run=dry_run,
                                        mode=statuses.get(book.key, {}).get('mode', 'automatic'))
                 except Exception as error:
                     message = str(error) if isinstance(error, ReadFailure) else 'Could not open the book or a connected reader.'
-                    result = error_result(book.title, message)
+                    result = error_result(book.title, message, retryable=isinstance(error, ReadFailure) and not isinstance(error, NeedsRecovery))
                 finally:
                     book.release()
                 if result.get('source') in plugins:
@@ -64,17 +69,21 @@ def run_catalogs(root, plugins, readers, notify, dry_run):
                     result['message'] = result['message'].replace(source + ' →', plugins[source].label + ' →', 1)
                 if not dry_run:
                     previous = statuses.get(book.key, {})
-                    statuses[book.key] = {'key': book.key, 'title': book.title,
+                    updated = {'key': book.key, 'title': book.title,
                         'mode': previous.get('mode', 'automatic'),
                         'reading_status': result.get('reading_status',
-                            'reading' if result['status'] not in ('error', 'unconfirmed') else previous.get('reading_status', 'unknown'))}
-                    private_json(root/'book-status.json', statuses)
+                            'reading' if result['status'] in ('synced', 'in_sync', 'preview') else previous.get('reading_status', 'unknown'))}
+                    if updated != previous:
+                        statuses[book.key] = updated
+                        statuses_changed = True
                 results.append({'key': book.key, 'title': book.title, **result})
                 del book
         except Exception:
             results.append(error_result(plugin.label, 'Could not load the book catalog.'))
+    if statuses_changed:
+        private_json(root/'book-status.json', statuses)
     return results
 
 
-def error_result(title, message):
-    return {'title': title, 'status': 'error', 'writes': 0, 'message': message}
+def error_result(title, message, *, retryable=False):
+    return {'title': title, 'status': 'error', 'writes': 0, 'message': message, 'retryable': retryable}

@@ -159,3 +159,47 @@ resumes when they leave the paused range. Manual pauses remain until changed and
 skip reader sessions. Discovery keeps the book's mapping available. Settings are
 stored privately in `book-status.json` under the configured data directory and
 survive restarts and remapping of the same book key. Preview does not save status.
+
+## Health, alerts, and automatic retries
+
+Open **Setup → Health, alerts, and retries** to configure on-page alerts, retry
+limits, and stale-job thresholds. Defaults are two extra attempts for failed
+scheduled jobs, after 5 and 10 minutes. Delays double with each retry and are
+capped at 60 minutes. Manual runs do not schedule automatic retries; they reset
+that job's pending retry cycle. Regular scheduled runs begin a fresh retry cycle.
+Disabling a schedule or automatic retries cancels its queued retries. Retry
+budgets and due times survive a service restart.
+
+Retries re-read service positions and retain the normal sync journal protections.
+Unconfirmed writes, changed-during-sync results, and known recovery-required
+states never queue an automatic progress retry. Book matching failures that need
+manual review are reported without a fast retry. Discovery's per-book retry
+eligibility (including Amazon delivery backoff) still applies.
+
+The Sync page shows installation health, last successful jobs, queued retries,
+and recent alerts. Health checks run every minute. Default stale thresholds are
+90 minutes for scheduled progress sync and 18 hours for discovery; disabled
+schedules do not trigger stale warnings. Repeated failures are grouped into an
+incident, and successful recovery resolves it. The private history retains the
+latest 50 incidents and displays the latest 10. Alerts are on-page only; nothing
+is sent by email or to an external notification service. Use **Create test alert**
+in Setup to verify the history without running a sync.
+
+`GET /api/health` is available through the same private-network restrictions as
+the page. It returns HTTP 200 when healthy and 503 when attention is needed.
+Settings and history live in private `health-config.json` and `health-state.json`
+files in the configured data directory.
+
+## Removing books from sync
+
+On the Sync page, choose **Remove from sync** beside a book in **Your books**.
+It leaves the active list and is excluded from both manual and scheduled progress
+sync before its map or readers are loaded. Open **Removed books** and choose
+**Restore** to bring it back with its previous reading-status setting.
+
+Removal is local to Placekeeper: it does not delete library books, loans, maps,
+reading positions, or recovery journals. It survives restarts and rediscovery of
+the same book. A separately imported edition can appear as another entry.
+Discovery can still list a removed title found in your libraries, but it will not
+restore it to active syncing. The discovery results list is collapsed by default;
+use **Discovered books** to show or hide it. Polling does not reopen the list.

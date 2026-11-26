@@ -12,6 +12,26 @@
   </form>
   <p class="muted setup-feedback" id="scheduleMessage" role="status"></p>
 </section>
+<section class="card">
+  <h2>Health, alerts, and retries</h2>
+  <p class="muted">Health is checked every minute. Alerts appear on the Sync page and remain in history. No external notifications are sent.</p>
+  <form id="healthForm">
+    <label class="check"><input type="checkbox" id="alertsEnabled"> Keep on-page failure and recovery alerts</label>
+    <label class="check"><input type="checkbox" id="retriesEnabled"> Retry failed scheduled jobs automatically</label>
+    <label for="maxRetries">Maximum extra attempts per scheduled run (0–5)</label>
+    <input type="number" id="maxRetries" min="0" max="5" required>
+    <label for="retryMinutes">First retry delay in minutes (1–60)</label>
+    <input type="number" id="retryMinutes" min="1" max="60" required>
+    <p class="muted">Later retries double the delay, capped at 60 minutes. Uncertain writes require review and are never retried automatically.</p>
+    <label for="progressStale">Warn after this many minutes without a successful scheduled progress sync</label>
+    <input type="number" id="progressStale" min="30" max="10080" required>
+    <label for="discoveryStale">Warn after this many hours without a successful scheduled discovery</label>
+    <input type="number" id="discoveryStale" min="6" max="720" required>
+    <button class="primary secondary" id="saveHealth" disabled>Save health settings</button>
+  </form>
+  <button type="button" class="primary secondary" id="testHealth">Create test alert</button>
+  <p class="muted setup-feedback" id="healthMessage" role="status"></p>
+</section>
 <div id="services"></div>
 <footer>Connections apply to this installation. Manage remote device grants in the provider’s account settings.</footer>
 </main>
@@ -106,7 +126,30 @@ function createPanel(key,service){
 const scheduleEnabled=document.getElementById('scheduleEnabled');
 const saveSchedule=document.getElementById('saveSchedule');
 const scheduleMessage=document.getElementById('scheduleMessage');
-let scheduleLoaded=false;
+let scheduleLoaded=false,healthLoaded=false;
+const healthFields={alerts_enabled:'alertsEnabled',retries_enabled:'retriesEnabled',max_retries:'maxRetries',retry_minutes:'retryMinutes',progress_stale_minutes:'progressStale',discovery_stale_hours:'discoveryStale'};
+function loadHealth(config){
+  for(const [key,id] of Object.entries(healthFields)){
+    const field=document.getElementById(id);
+    if(field.type==='checkbox')field.checked=config[key];else field.value=config[key];
+  }
+}
+document.getElementById('testHealth').onclick=async()=>{
+  const button=document.getElementById('testHealth');button.disabled=true;
+  try{await call('/api/health-test',{});document.getElementById('healthMessage').textContent='Test alert recorded. Open Recent alerts on the Sync page to see it.';}
+  catch(error){document.getElementById('healthMessage').textContent=error.message;}
+  finally{button.disabled=false;}
+};
+document.getElementById('healthForm').onsubmit=async event=>{
+  event.preventDefault();const button=document.getElementById('saveHealth'),message=document.getElementById('healthMessage');
+  button.disabled=true;
+  const config=Object.fromEntries(Object.entries(healthFields).map(([key,id])=>{
+    const field=document.getElementById(id);return [key,field.type==='checkbox'?field.checked:Number(field.value)];
+  }));
+  try{loadHealth(await call('/api/health-config',config));message.textContent='Health settings saved.';}
+  catch(error){message.textContent=error.message;}
+  finally{button.disabled=false;}
+};
 document.getElementById('scheduleForm').onsubmit=async event=>{
   event.preventDefault();
   scheduleEnabled.disabled=saveSchedule.disabled=true;
@@ -122,6 +165,7 @@ document.getElementById('scheduleForm').onsubmit=async event=>{
 };
 async function refresh(){
   const status=await call('/api/status');
+  if(!healthLoaded&&status.health){loadHealth(status.health.config);document.getElementById('saveHealth').disabled=false;healthLoaded=true;}
   if(!scheduleLoaded){
     scheduleEnabled.checked=status.schedule_enabled;
     document.getElementById('discoveryEnabled').checked=status.discovery_enabled;

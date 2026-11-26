@@ -10,3 +10,7 @@ class MissingProgress(ReadFailure):
 
 class UnsupportedMapping(ReadFailure):
     """A verified service position cannot be mapped for this edition."""
+
+
+class NeedsRecovery(ReadFailure):
+    """An uncertain earlier write requires explicit recovery, not an automatic retry."""

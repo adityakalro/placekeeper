@@ -8,9 +8,10 @@ import os
 from pathlib import Path
 import secrets
 import threading
-from time import monotonic
+from time import monotonic, time
 
 from placekeeper.sync.worker import run_worker
+from placekeeper.monitoring import Monitor, discovery_problem, pending_write
 from placekeeper.sync import book_status
 from placekeeper.web.setup import Connections
 from placekeeper.errors import ReadFailure
@@ -41,6 +42,8 @@ class Jobs:
         self.discovery_enabled=self.load('web-schedule.json', {}).get('discovery_enabled') is True
         self.next_discovery=monotonic() if self.discovery_enabled else None
         self.scheduler_stopped=False
+        self.monitor=Monitor(self.root)
+        self.next_health=0
 
     def load(self, name, default):
         path=self.root/name
@@ -50,15 +53,19 @@ class Jobs:
     def running(self):
         return self.running_job is not None
 
-    def discovery_ready(self):
-        plugins=self.connections.connected()
+    def discovery_ready(self, plugins=None):
+        plugins=self.connections.connected() if plugins is None else plugins
         return any(plugin.discover is not None and all(key in plugins for key in plugin.catalog_requires)
                    for plugin in plugins.values())
 
     def status(self):
-        return {'books': list(book_status.load(self.root).values()),
-                'connected':self.connections.ready(), 'services':self.connections.status(),
-                'can_discover':self.discovery_ready(), 'running_job':self.running_job,
+        books=list(book_status.load(self.root).values())
+        services=self.connections.connected()
+        return {'health':self.monitor.snapshot(),
+                'books':[book for book in books if not book.get('removed')],
+                'removed_books':[book for book in books if book.get('removed')],
+                'connected':self.connections.ready(services), 'services':self.connections.status(services),
+                'can_discover':self.discovery_ready(services), 'running_job':self.running_job,
                 'running':self.running,'phase':self.phase,'last':self.last,
                 'last_discovery':self.last_discovery,'schedule_enabled':self.schedule_enabled, 'discovery_enabled':self.discovery_enabled}
 
@@ -75,11 +82,35 @@ class Jobs:
         return run_books(self.root,self.connections.connected(),notify)
 
     def set_book_status(self, key, mode):
+        self.change_book(book_status.save_mode, key, mode)
+
+    def set_book_removed(self, key, removed):
+        self.change_book(book_status.save_removed, key, removed)
+
+    def change_book(self, action, key, value):
         if not self.lock.acquire(blocking=False):
             raise ValueError('Wait for the current job to finish.')
         try:
             with state_lock(self.root/'manual-sync-job'), onboarding_lock(self.root):
-                book_status.save_mode(self.root, key, mode)
+                action(self.root, key, value)
+        finally:
+            self.lock.release()
+
+    def check_health(self):
+        enabled={'progress':self.schedule_enabled, 'discovery':self.discovery_enabled}
+        services=self.connections.connected()
+        ready={'progress':self.custom_jobs or self.connections.ready(services),
+               'discovery':self.custom_jobs or self.discovery_ready(services)}
+        self.monitor.tick(enabled, ready)
+
+    def set_health(self, data):
+        if not self.lock.acquire(blocking=False):
+            raise ValueError('Wait for the current job to finish.')
+        try:
+            self.monitor.configure(data)
+            self.check_health()
+            with self.schedule_changed:
+                self.schedule_changed.notify()
         finally:
             self.lock.release()
 
@@ -93,36 +124,45 @@ class Jobs:
         with self.schedule_changed:
             if enabled != self.schedule_enabled or discovery_enabled != self.discovery_enabled:
                 private_json(self.root/'web-schedule.json', {'enabled': enabled, 'discovery_enabled': discovery_enabled})
-                self.discovery_enabled=discovery_enabled
-                self.next_discovery=monotonic() if discovery_enabled else None
-                self.schedule_enabled=enabled
-                self.next_sync=monotonic()+PROGRESS_INTERVAL if enabled else None
+                if discovery_enabled != self.discovery_enabled:
+                    self.discovery_enabled=discovery_enabled
+                    self.next_discovery=monotonic() if discovery_enabled else None
+                if enabled != self.schedule_enabled:
+                    self.schedule_enabled=enabled
+                    self.next_sync=monotonic()+PROGRESS_INTERVAL if enabled else None
+                self.check_health()
                 self.schedule_changed.notify()
 
     def schedule(self):
         with self.schedule_changed:
             while not self.scheduler_stopped:
-                due = [(stamp, job) for stamp, job in
-                       ((self.next_sync, 'progress'), (self.next_discovery, 'discovery')) if stamp is not None]
+                now=monotonic()
+                if now>=self.next_health:
+                    try:self.check_health()
+                    except (OSError, ValueError):pass
+                    self.next_health=now+60
+                due=[(stamp,job,False) for stamp,job in
+                     ((self.next_sync,'progress'),(self.next_discovery,'discovery')) if stamp is not None]
+                due.extend((now+max(0,stamp-time()),job,True) for job,stamp in self.monitor.retries().items())
                 if not due:
-                    self.schedule_changed.wait()
+                    self.schedule_changed.wait(max(0,self.next_health-monotonic()))
                     continue
-                stamp, job = min(due)
-                remaining=stamp-monotonic()
-                if remaining > 0:
+                stamp,job,retry=min(due)
+                remaining=min(stamp,self.next_health)-monotonic()
+                if remaining>0:
                     self.schedule_changed.wait(remaining)
                     continue
-                if job == 'discovery':
-                    self.next_discovery=monotonic()+DISCOVERY_INTERVAL
-                else:
-                    self.next_sync=monotonic()+PROGRESS_INTERVAL
+                if stamp>monotonic():
+                    continue
+                if retry:
+                    self.monitor.defer_retry(job)
+                elif job=='discovery':self.next_discovery=monotonic()+DISCOVERY_INTERVAL
+                else:self.next_sync=monotonic()+PROGRESS_INTERVAL
                 try:
-                    started = self.start(job)
-                    if not started:
-                        if job == 'discovery':
-                            self.next_discovery=monotonic()+60
-                        else:
-                            self.next_sync=monotonic()+60
+                    started=self.start(job, scheduled=True, retry=retry)
+                    if not started and not retry:
+                        if job=='discovery':self.next_discovery=monotonic()+60
+                        else:self.next_sync=monotonic()+60
                 except ValueError:
                     continue
 
@@ -141,11 +181,13 @@ class Jobs:
             raise ValueError('Wait for the current sync or setup action to finish.')
         try:
             with onboarding_lock(self.root):
-                return self.connections.apply(service,action,data)
+                result=self.connections.apply(service,action,data)
+                self.check_health()
+                return result
         finally:
             self.lock.release()
 
-    def start(self, job='progress'):
+    def start(self, job='progress', *, scheduled=False, retry=False):
         if not self.lock.acquire(blocking=False):
             return False
         try:
@@ -154,30 +196,35 @@ class Jobs:
                     raise ValueError('Connect a book discovery source in Setup.')
                 if job=='progress' and not self.connections.ready():
                     raise ValueError('Connect two readers and a book catalog in Setup.')
+            self.monitor.begin(job, retry)
             self.running_job=job
             self.phase='Finding new books…' if job=='discovery' else 'Checking progress…'
-            threading.Thread(target=self.run,args=(job,),daemon=True).start()
+            threading.Thread(target=self.run,args=(job,scheduled),daemon=True).start()
         except BaseException:
             self.running_job=None
             self.lock.release()
             raise
         return True
 
-    def run(self, job):
+    def run(self, job, scheduled=False):
         started=datetime.now(timezone.utc).isoformat()
         discovery=job=='discovery'
+        retryable=False
         try:
             with state_lock(self.root/'manual-sync-job'):
                 if discovery:
                     counts=self.onboard()
                     result={'discovery':counts}
-                    failed=bool(counts.get('discovery_error') or counts.get('loan_check_failed'))
+                    failed,retryable=discovery_problem(counts)
                 else:
                     books=self.sync(lambda text:setattr(self,'phase',text))
                     result={'books':books}
-                    failed=any(book['status'] in ('error','unconfirmed','changed') for book in books)
+                    failures=[book for book in books if book['status'] in ('error','unconfirmed','changed')]
+                    failed=bool(failures)
+                    retryable=bool(failures) and all(book.get('retryable') is True and book.get('writes',0)==0 for book in failures)
                 result['status']='needs_attention' if failed else 'complete'
         except Exception:
+            retryable=True
             result={'status':'error','message':('Book discovery' if discovery else 'Progress sync')
                     +' could not finish. Check the connection and try again.'}
         try:
@@ -188,6 +235,10 @@ class Jobs:
             else:
                 private_json(self.root/'web-last-sync.json',result)
                 self.last=result
+            retryable=retryable and (discovery or not pending_write(self.root))
+            self.monitor.finish(job,result,scheduled=scheduled,retryable=retryable)
+            with self.schedule_changed:
+                self.schedule_changed.notify()
         finally:
             self.phase='Ready'
             self.running_job=None
@@ -203,6 +254,7 @@ SETUP_PAGE = PAGE_SHELL + (TEMPLATES/'setup.html').read_text(encoding='utf-8')
 def handler_for(jobs,hosts,networks):
     csrf=secrets.token_urlsafe(32)
     class Handler(BaseHTTPRequestHandler):
+        timeout=15
         def log_message(self,*_):pass
         def allowed(self):
             try:ip=ipaddress.ip_address(self.client_address[0])
@@ -225,6 +277,10 @@ def handler_for(jobs,hosts,networks):
                 page=SETUP_PAGE if self.path=='/setup' else PAGE
                 self.send(200,page.replace('NONCE',nonce).replace('CSRF',csrf),'text/html',nonce)
             elif self.path=='/api/status':self.send(200,jobs.status())
+            elif self.path=='/api/health':
+                jobs.check_health()
+                health=jobs.monitor.snapshot()
+                self.send(200 if health['status']=='healthy' else 503,health)
             else:self.send(404,{'error':'Not found'})
         def do_POST(self):
             if not self.allowed():self.send(403,{'error':'Private network required'});return
@@ -247,6 +303,21 @@ def handler_for(jobs,hosts,networks):
                 except (ValueError,ReadFailure) as e:self.send(400,{'error':str(e)});return
                 except (httpx.HTTPError,OSError,KeyError,TypeError):self.send(502,{'error':'Could not complete setup. Check the service and try again.'});return
                 self.send(200,result)
+            elif self.path=='/api/health-test':
+                try:jobs.monitor.test_alert()
+                except ValueError as e:self.send(400,{'error':str(e)});return
+                except OSError:self.send(500,{'error':'Could not save the test alert.'});return
+                self.send(200,{'saved':True})
+            elif self.path=='/api/health-config':
+                try:jobs.set_health(data)
+                except ValueError as e:self.send(400,{'error':str(e)});return
+                except OSError:self.send(500,{'error':'Could not save health settings.'});return
+                self.send(200,jobs.monitor.snapshot()['config'])
+            elif self.path=='/api/book-removed':
+                try:jobs.set_book_removed(data.get('key'), data.get('removed'))
+                except ValueError as e:self.send(400,{'error':str(e)});return
+                except OSError:self.send(500,{'error':'Could not save book removal.'});return
+                self.send(200,{'saved':True})
             elif self.path=='/api/book-status':
                 try:jobs.set_book_status(data.get('key'), data.get('mode'))
                 except ValueError as e:self.send(400,{'error':str(e)});return

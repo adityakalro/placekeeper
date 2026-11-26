@@ -42,6 +42,16 @@ ssh -N -L 127.0.0.1:8780:127.0.0.1:8780 YOUR_USER@YOUR_PI_HOST
 
 Open [Setup](http://127.0.0.1:8780/setup), [connect your accounts](../README.md#3-connect-your-accounts), and [sync a first book](../README.md#4-sync-your-first-book). The web page starts at boot. Use **Find new books** for discovery and mapping and **Sync now** for progress. To sync progress every 30 minutes, enable automatic progress sync in **Setup**. The web service saves the setting across restarts and starts a fresh interval on startup. A scheduled run skips its turn if another job is active or the necessary services are disconnected.
 
+The web service owns the discovery and progress schedules. Do not enable the
+legacy `placekeeper-onboarding.service` alongside it: that unit starts a separate
+five-minute discovery loop outside the web schedule and health controls. If an
+older installation enabled that unit, stop and disable it when switching to the
+web scheduler:
+
+```sh
+systemctl disable --now placekeeper-onboarding.service
+```
+
 ## 3. Optional LAN or WireGuard access
 
 Edit `/var/lib/placekeeper/web-config.json`. Set `bind` to a private interface address, or use `0.0.0.0` for multiple interfaces. Keep the trusted client ranges in `networks` and list each address you actually visit in `hosts`, including its port. For example, replace the example LAN address and subnet below with your own. Add your WireGuard address and subnet if you use it.

@@ -3,11 +3,10 @@
 Run on the destination before its watcher starts. Does not contact services.
 """
 import argparse
-import hashlib
 import json
 from pathlib import Path
 
-from placekeeper.storage import private_json
+from placekeeper.storage import file_sha256, private_json
 
 
 def relocate(data_root, previous_root):
@@ -22,15 +21,28 @@ def relocate(data_root, previous_root):
     profiles=list((data_root/'onboarding/books').glob('*/profile.json'))
     for manual in data_root.glob('*profile.json'):
         candidate=json.loads(manual.read_text())
-        if {'epub','content','locations'}<=set(candidate.get('files',{})):
+        files=set(candidate.get('files',{}))
+        if {'epub','content','locations'}<=files or {'epub','chapters'}<=files:
             profiles.append(manual)
+    changes=[]
     for p in profiles:
         profile=json.loads(p.read_text())
         for record in profile['files'].values():
             record['path']=path(record['path'])
-            if hashlib.sha256(Path(record['path']).read_bytes()).hexdigest()!=record['sha256']:
+            if file_sha256(record['path'])!=record['sha256']:
                 raise ValueError('Transferred book/map fingerprint mismatch')
-        private_json(p,profile)
+        changes.append((p,profile))
+    reader_path=data_root/'reader-books.json'
+    if reader_path.exists():
+        readers=json.loads(reader_path.read_text())
+        for book in readers['books']:
+            book['epub']=path(book['epub'])
+            if file_sha256(book['epub'])!=book['sha256']:
+                raise ValueError('Transferred reader EPUB fingerprint mismatch')
+        changes.append((reader_path,readers))
+    # Validate every input before publishing any rewritten paths.
+    for target,data in changes:
+        private_json(target,data)
     state_path=data_root/'onboarding/state.json'
     if state_path.exists():
         state=json.loads(state_path.read_text())
@@ -42,7 +54,7 @@ def relocate(data_root, previous_root):
             if 'profile' in job:job['profile']=path(job['profile'])
             for record in job.get('files',{}).values():record['path']=path(record['path'])
             if job.get('status')=='ready':
-                job['profile_sha256']=hashlib.sha256(Path(job['profile']).read_bytes()).hexdigest()
+                job['profile_sha256']=file_sha256(job['profile'])
                 ready[doc] = {'document':doc,'path':job['profile'],'sha256':job['profile_sha256']}
         membership = [entry['document'] for entry in registry['profiles']] if 'profiles' in registry else list(ready)
         registry['profiles'] = [ready[doc] for doc in membership if doc in ready]

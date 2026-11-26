@@ -26,6 +26,8 @@ class LibbyReader:
         except ValueError:
             if native < self.chapters.rows[0][3]:
                 coordinate = self.coordinates[0]
+            elif native == self.timing['duration']:
+                coordinate = self.coordinates[-1]
             else:
                 raise UnsupportedMapping('Libby is outside the mapped chapters.') from None
         stamp = marker.get('timestamp')

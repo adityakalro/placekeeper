@@ -279,6 +279,21 @@ class PluginEngineTests(unittest.TestCase):
         self.assertEqual(result['outcomes'], {'a': 'verified'})
         self.assertEqual(second.writes, [])
 
+    def test_completed_audio_observation_can_pause_automatic_sync(self):
+        chapters=Mock();chapters.rows=[('Chapter',0,100,0,3000)]
+        chapters.to_text.side_effect=ValueError('End of recording')
+        libby=Mock();libby.state={'chipId':'test'}
+        timing={'parts':[{'spine':0,'start':0,'duration':3000}],'duration':3000}
+        from placekeeper.mapping.text import TextIndex
+        coordinates=TextIndex.make([('a'*100,lambda offset:f'/body/p[1]/text()[1].{offset}')]).coordinates
+        reader=LibbyReader(libby,{},Mock(),'',timing,chapters,coordinates,
+                          {'spinePosition':0,'componentMilliseconds':3000})
+        observation=reader.read({})
+        self.assertEqual(observation.fraction,1)
+        self.assertEqual(observation.anchor,99)
+        from placekeeper.sync.book_status import automatic_status
+        self.assertEqual(automatic_status({'libby':observation}),'finished')
+
     def test_audio_introduction_can_advance_to_first_mapped_chapter(self):
         chapters = Mock()
         chapters.rows = [('Chapter One', 20, 100, 1_080_000, 1_790_000)]

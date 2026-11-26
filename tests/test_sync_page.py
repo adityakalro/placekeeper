@@ -58,6 +58,66 @@ class PageTests(unittest.TestCase):
             finally:
                 jobs.lock.release()
 
+    def test_health_api_config_and_test_alert(self):
+        from placekeeper.monitoring import DEFAULTS
+        with tempfile.TemporaryDirectory() as directory:
+            jobs=Jobs(directory)
+            h=self.handler(jobs,'/api/health');h.do_GET();self.assertEqual(h.code,200)
+            h=self.handler(jobs,'/setup',origin='http://127.0.0.1:8780',body=json.dumps(DEFAULTS).encode())
+            h.do_GET();token=re.search(rb"const csrf='([^']+)'",h.wfile.getvalue())[1].decode()
+            h.path='/api/health-config';h.do_POST();self.assertEqual(h.code,403)
+            h.headers['X-Placekeeper']=token;h.do_POST();self.assertEqual(h.code,200)
+            h.path='/api/health-test';h.rfile=io.BytesIO(b'{}');h.headers.replace_header('Content-Length','2')
+            h.do_POST();self.assertEqual(h.code,200)
+            alerts=jobs.monitor.snapshot()['alerts']
+            self.assertEqual(alerts[-1]['key'],'test')
+            self.assertIsNotNone(alerts[-1]['resolved_at'])
+            self.assertEqual(Jobs(directory).monitor.snapshot()['alerts'],alerts)
+            jobs.monitor.begin('progress')
+            jobs.monitor.finish('progress',{'status':'error'},scheduled=False,retryable=False)
+            h=self.handler(jobs,'/api/health');h.do_GET();self.assertEqual(h.code,503)
+
+    def test_remove_restore_api_requires_csrf(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            private_json(root/'book-status.json',{'book':{'key':'book','title':'Title','mode':'reading'}})
+            jobs=Jobs(root)
+            h=self.handler(jobs,'/',origin='http://127.0.0.1:8780',body=b'{"key":"book","removed":true}')
+            h.do_GET();token=re.search(rb"const csrf='([^']+)'",h.wfile.getvalue())[1].decode()
+            h.path='/api/book-removed';h.do_POST();self.assertEqual(h.code,403)
+            h.headers['X-Placekeeper']=token;h.do_POST();self.assertEqual(h.code,200)
+            self.assertEqual(jobs.status()['books'],[])
+            h.rfile=io.BytesIO(b'{"key":"book","removed":false}')
+            h.headers.replace_header('Content-Length',str(len(h.rfile.getvalue())))
+            h.do_POST();self.assertEqual(h.code,200)
+            self.assertEqual(jobs.status()['books'][0]['title'],'Title')
+
+    def test_each_status_request_checks_each_connection_once(self):
+        from placekeeper.plugins.contracts import Plugin
+        with tempfile.TemporaryDirectory() as directory:
+            plugins={str(i):Plugin(str(i),str(i),()) for i in range(4)}
+            jobs=Jobs(directory,plugins=plugins)
+            with patch.object(Plugin,'connected',return_value=True) as connected:
+                jobs.status()
+                self.assertEqual(connected.call_count,4)
+
+    def test_schedules_keep_independent_deadlines(self):
+        with tempfile.TemporaryDirectory() as directory:
+            jobs=Jobs(directory,onboard=lambda:{},sync=lambda notify:[])
+            with patch('placekeeper.web.app.monotonic',return_value=100):
+                jobs.set_schedule(True,True)
+            jobs.next_discovery=10000
+            with patch('placekeeper.web.app.monotonic',return_value=200):
+                jobs.set_schedule(False,True)
+            self.assertEqual(jobs.next_discovery,10000)
+            with patch('placekeeper.web.app.monotonic',return_value=300):
+                jobs.set_schedule(True,True)
+            self.assertEqual(jobs.next_sync,2100)
+            with patch('placekeeper.web.app.monotonic',return_value=400):
+                jobs.set_schedule(True,False)
+            self.assertEqual(jobs.next_sync,2100)
+            self.assertIsNone(jobs.next_discovery)
+
     def test_public_sources_and_unexpected_hosts_are_rejected(self):
         for opts in ({'ip':'203.0.113.9'},{'host':'evil.example:8780'}):
             h=self.handler(Mock(),'/api/status',**opts);h.do_GET();self.assertEqual(h.code,403)

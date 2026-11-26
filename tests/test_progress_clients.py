@@ -1,5 +1,7 @@
 """Check protocol behavior in the production progress clients."""
 import unittest
+from pathlib import Path
+import tempfile
 from unittest.mock import MagicMock, Mock, patch
 from xml.etree import ElementTree
 
@@ -12,11 +14,34 @@ from placekeeper.plugins.kindle.progress import (
 )
 from placekeeper.plugins.kindle.reader import KindleReader
 from placekeeper.plugins.transport import json_reader
+from placekeeper.plugins.libby.client import Libby, elapsed
 
 P1 = '/body/DocFragment[1]/body/p[1]/text()[1].0'
 
 
 class ProgressClientTests(unittest.TestCase):
+    def test_libby_rejects_malformed_data_without_exposing_the_response(self):
+        for payload in (b'not JSON: private content',b'[]'):
+            with tempfile.TemporaryDirectory() as directory:
+                libby=Libby(Path(directory)/'device.json')
+                libby.state={'identity':'test'}
+                libby.client.close()
+                libby.client=httpx.Client(transport=httpx.MockTransport(lambda request:httpx.Response(200,content=payload)))
+                try:
+                    with self.assertRaisesRegex(ReadFailure,'^Libby returned invalid data.$'):
+                        libby.get('/chip/sync')
+                finally:libby.close()
+
+    def test_libby_accepts_final_completion_but_rejects_ambiguous_positions(self):
+        timing={'parts':[{'spine':0,'start':0,'duration':1000},
+                         {'spine':1,'start':1000,'duration':2000}],'duration':3000}
+        self.assertEqual(elapsed(timing,{'spinePosition':1,'componentMilliseconds':2000}),3000)
+        for marker in ({'spinePosition':0,'componentMilliseconds':1000},
+                       {'spinePosition':9,'componentMilliseconds':0},
+                       {'spinePosition':1,'componentMilliseconds':True},
+                       {'spinePosition':1,'componentMilliseconds':float('nan')},None):
+            with self.assertRaises(ReadFailure):elapsed(timing,marker)
+
     def test_wrong_book_and_missing_progress_fail_closed(self):
         with self.assertRaises(ReadFailure):
             kindle_position({'payload': {'key': 'wrong', 'type': 'PDOC'}}, 'book')

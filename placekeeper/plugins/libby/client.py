@@ -118,15 +118,22 @@ class Libby:
             try:
                 response = self.client.get(self.BASE + path,
                     headers={'Authorization': 'Bearer ' + self.state['identity']})
-                if response.status_code == 403 and attempt == 0 and response.json().get('result') == 'missing_chip':
+                if response.status_code not in (200, 403, 404):
+                    raise ReadFailure(f'Libby read returned HTTP {response.status_code}.')
+                try:
+                    data = response.json()
+                except ValueError:
+                    raise ReadFailure('Libby returned invalid data.') from None
+                if not isinstance(data, dict):
+                    raise ReadFailure('Libby returned invalid data.')
+                if response.status_code == 403 and attempt == 0 and data.get('result') == 'missing_chip':
                     self.refresh()
                     continue
-                if allow_missing_position and response.status_code == 404:
-                    if response.json().get('result') == 'missing_stamp':
-                        return {}
+                if allow_missing_position and response.status_code == 404 and data.get('result') == 'missing_stamp':
+                    return {}
                 if response.status_code != 200:
                     raise ReadFailure(f'Libby read returned HTTP {response.status_code}.')
-                return response.json()
+                return data
             except httpx.HTTPError:
                 raise ReadFailure('Could not reach Libby.') from None
 
@@ -206,8 +213,15 @@ class Libby:
 
 
 def elapsed(timing, marker):
-    part = next(p for p in timing['parts'] if p['spine'] == marker['spinePosition'])
-    offset = marker['componentMilliseconds']
-    if not isinstance(offset, (int, float)) or not math.isfinite(offset) or not 0 <= offset < part['duration']:
+    if not isinstance(marker, dict) or type(marker.get('spinePosition')) is not int:
+        raise ReadFailure('Libby returned an invalid listening position.')
+    matches = [part for part in timing['parts'] if part['spine'] == marker['spinePosition']]
+    if len(matches) != 1:
+        raise ReadFailure('Libby returned an unknown or ambiguous audio part.')
+    part = matches[0]
+    offset = marker.get('componentMilliseconds')
+    if (type(offset) not in (int, float) or not math.isfinite(offset)
+            or not 0 <= offset <= part['duration']
+            or (offset == part['duration'] and part is not timing['parts'][-1])):
         raise ReadFailure('Libby returned an invalid listening position.')
     return part['start'] + round(offset)
