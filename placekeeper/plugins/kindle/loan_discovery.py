@@ -73,7 +73,7 @@ def x4_loans(root, books, loans):
         get = json_reader(client, missing_status=404)
 
         def has_progress(book):
-            filename = book['title'] + '.epub'
+            filename = book.get('filename',book['title'] + '.epub')
             document = md5(filename.encode()).hexdigest()
             try:
                 progress = read_progress(get, headers, document)

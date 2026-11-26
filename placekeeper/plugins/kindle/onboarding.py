@@ -26,7 +26,7 @@ from placekeeper.plugins.kindle.catalog import AmazonCatalog
 from placekeeper.plugins.kindle.delivery import download_kfx, probe
 from placekeeper.plugins.kindle.loan_discovery import MetadataIndex, active_loans, kindle_matches, x4_loans
 from placekeeper.plugins.kindle.store_mapping import StoreDeliveryDenied, StoreMapper, extract_chapters
-from placekeeper.plugins.readest.client import ReadestSource
+from placekeeper.plugins.library.source import LibrarySource
 from placekeeper.errors import ReadFailure
 from placekeeper.storage import ROOT, default_data_root, digest, file_sha256 as file_hash, private_json, state_lock
 from placekeeper.mapping.text import Mapper, epub_index, kfx_index
@@ -186,7 +186,7 @@ class Onboarder:
             except ValueError:
                 return {'status':'edition_mismatch', 'catalog_signature':catalog_signature}
             private_json(chapters, chapter_table)
-            filename = candidate['title']+'.epub'
+            filename = candidate.get('filename',candidate['title']+'.epub')
             if title_counts[candidate['title']] != 1 or any(c in filename for c in '<>:"/\\|?*'):
                 return {'status':'needs_review', 'catalog_signature':catalog_signature}
             files = {name: {'path':str(path.resolve()), 'sha256':file_hash(path)}
@@ -205,7 +205,7 @@ class Onboarder:
                     'catalog_signature':catalog_signature}
         candidate,epub,evidence=accepted[0]
         epub_text = accepted_index
-        filename=candidate['title']+'.epub'
+        filename=candidate.get('filename',candidate['title']+'.epub')
         if any(c in filename for c in '<>:"/\\|?*') or any(ord(c)<32 for c in filename) or filename in ('.epub','..epub'):
             return {'status':'needs_review','reason':'unsupported_x4_filename','catalog_signature':catalog_signature}
         if title_counts[candidate['title']]>1:
@@ -235,7 +235,7 @@ class Onboarder:
         if len(possible) != 1:
             return {'status': 'needs_review', 'catalog_signature': signature}
         candidate = possible[0]
-        filename = candidate['title'] + '.epub'
+        filename = candidate.get('filename',candidate['title']+'.epub')
         if (any(c in filename for c in '<>:"/\\|?*') or any(ord(c) < 32 for c in filename)
                 or title_counts[candidate['title']] != 1):
             return {'status': 'needs_review', 'catalog_signature': signature}
@@ -383,7 +383,8 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--root',type=Path,default=default_data_root()/'onboarding')
     p.add_argument('--amazon-auth',type=Path,default=default_data_root()/'amazon-kindle-download-device.json')
-    p.add_argument('--readest-auth',type=Path,default=default_data_root()/'readest-device.json')
+    p.add_argument('--library-root',type=Path,default=default_data_root())
+    p.add_argument('--readest-auth',type=Path,help='Optional override for Readest credentials')
     p.add_argument('--kfxlib-parent',type=Path,default=default_data_root()/'vendor/python')
     p.add_argument('--loan-root',type=Path,help='Discover from active Libby loans and saved X4 positions')
     p.add_argument('--watch',action='store_true')
@@ -391,7 +392,7 @@ def main():
     args=p.parse_args()
     if args.interval<60:p.error('interval must be at least 60 seconds')
     os.umask(0o077)
-    source=ReadestSource(args.readest_auth);catalog=AmazonCatalog(args.amazon_auth)
+    source=LibrarySource(args.library_root,args.readest_auth);catalog=AmazonCatalog(args.amazon_auth)
     try:
         engine=Onboarder(args.root,args.amazon_auth,args.kfxlib_parent,source,catalog)
         while True:

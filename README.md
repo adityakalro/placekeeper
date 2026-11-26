@@ -5,10 +5,10 @@ Placekeeper helps you pick up where you left off across Send to Kindle documents
 ## Before you start
 
 - A Linux host or an Android device with Termux. You need Git to clone the repository and Python 3.13 or newer to run it.
-- An Amazon account with a **Send to Kindle** personal document and the matching EPUB in **Readest Cloud**. Use the same ebook edition in both places.
+- An Amazon account with a **Send to Kindle** personal document and the matching EPUB uploaded to **Placekeeper**. Use the same ebook edition in both places.
 - At least one sync destination. Use the sync account configured on your **CrossPoint X4**, an active **Libby audiobook loan**, or both.
 
-Each installation uses one household’s accounts. The included Kindle catalog uses Readest to match editions. Additional plugins can provide their own verified catalogs. Kindle positions are approximate to a location bucket, and Libby positions are approximate within matched chapters. Placekeeper can build maps for Send to Kindle documents and supported Kindle Store books. Store maps align numbered chapters and estimate positions within each chapter.
+Each installation uses one household’s accounts. The included Kindle catalog uses uploaded EPUBs to match editions; Readest is optional. Additional plugins can provide their own verified catalogs. Kindle positions are approximate to a location bucket, and Libby positions are approximate within matched chapters. Placekeeper can build maps for Send to Kindle documents and supported Kindle Store books. Store maps align numbered chapters and estimate positions within each chapter.
 
 ## 1. Install Placekeeper
 
@@ -57,8 +57,8 @@ Once Setup says **Ready to sync**, return to the **Sync** page. The credentials 
 
 ## 4. Sync your first book
 
-1. Send the EPUB to Kindle with **Add to your library** enabled. Upload the same edition to **Readest Cloud** so Placekeeper can download it.
-2. Open the personal document on Kindle, turn a page, and sync Kindle. If you use an X4, download the EPUB from Readest, keep its `Title.epub` filename, use filename-based document matching, and run **Sync Progress** in the book. If you use Libby, open the matching audiobook loan, listen briefly, and sync your shelf.
+1. Send the EPUB to Kindle with **Add to your library** enabled. Upload the same edition using **Upload book** on the Placekeeper Sync page.
+2. Open the personal document on Kindle, turn a page, and sync Kindle. If you use an X4, add Placekeeper’s `/opds` catalog in the X4 OPDS settings, download the EPUB, keep its provided filename, use filename-based document matching, and run **Sync Progress** in the book. If you use Libby, open the matching audiobook loan, listen briefly, and sync your shelf.
 3. In Placekeeper, click **Find new books** to discover the book and build its map. A long book can take a minute or more on a small Pi. When discovery finishes, click **Sync now** to transfer progress. Each job shows its own result.
 4. On the destination, use **Sync Progress** on X4, **Sync to Furthest Page Read** on Kindle, or **Shelf → Actions → Synchronize Shelf** in Libby. Open the book or audiobook to pick up the saved position.
 
@@ -66,13 +66,13 @@ For future handoffs, sync the device you were using before clicking **Sync now**
 
 ## How Find new books selects titles
 
-With Libby and CrossPoint connected, Placekeeper starts with active Libby audiobook loans. It matches the title and author to the Readest EPUB catalog and checks for a saved X4 position using the EPUB filename. Then it checks the Kindle library for a matching personal document or Kindle store book. Run **Sync Progress** on the X4 once for a book to make it discoverable. Keep the Readest filename and use filename matching on the X4.
+With Libby and CrossPoint connected, Placekeeper starts with active Libby audiobook loans. It matches the title and author to the EPUB library catalog and checks for a saved X4 position using the EPUB filename. Then it checks the Kindle library for a matching personal document or Kindle store book. Run **Sync Progress** on the X4 once for a book to make it discoverable. Keep the downloaded filename and use filename matching on the X4.
 
-Discovery includes titles available to a pair of readers. Kindle–X4 and Kindle–Libby use the Kindle edition map. X4–Libby can use a Readest EPUB directly when Kindle is absent or its edition cannot be mapped. The results also show Kindle mapping failures for review. When both copies map to the same EPUB, the verified personal document takes precedence. For Store editions, Placekeeper downloads chapter and location data using the connected Kindle device and a compatible Amazon voucher. If Amazon denies delivery or the chapter sequences disagree, the Store copy stays out of progress sync. If a mapped book is missing from Libby or the X4, the other two readers can still sync when both have saved positions.
+Discovery includes titles available to a pair of readers. Kindle–X4 and Kindle–Libby use the Kindle edition map. X4–Libby can use an uploaded EPUB directly when Kindle is absent or its edition cannot be mapped. The results also show Kindle mapping failures for review. When both copies map to the same EPUB, the verified personal document takes precedence. For Store editions, Placekeeper downloads chapter and location data using the connected Kindle device and a compatible Amazon voucher. If Amazon denies delivery or the chapter sequences disagree, the Store copy stays out of progress sync. If a mapped book is missing from Libby or the X4, the other two readers can still sync when both have saved positions.
 
 ## Using only some services
 
-For the built-in catalog, Kindle and Readest provide the book maps. Connect CrossPoint, Libby, or both. A book can sync between any two connected reading services with saved positions. A missing X4 position or an unread Kindle copy can be left out of an audio handoff. An audiobook loan without saved listening progress leaves Kindle and X4 on their normal ebook sync path. When fewer than two positions are available, the book is skipped.
+For the built-in catalog, Kindle and your EPUB library provide the book maps. Connect CrossPoint, Libby, or both. A book can sync between any two connected reading services with saved positions. A missing X4 position or an unread Kindle copy can be left out of an audio handoff. An audiobook loan without saved listening progress leaves Kindle and X4 on their normal ebook sync path. When fewer than two positions are available, the book is skipped.
 
 If a connected service returns a connection or authentication error, Placekeeper reports it for that book. It can still process the other books in the job.
 
@@ -81,7 +81,7 @@ If a connected service returns a connection or authentication error, Placekeeper
 An interrupted write may need a check on the destination. Run `.venv/bin/python -m placekeeper.sync.recovery` on the host using the Placekeeper service account and data directory. If the target landed, run **Sync now** to verify it. If the destination has settled and the write did not land, use `--clear JOURNAL_ID` and run **Sync now**. Placekeeper rechecks the readers before resuming a partial handoff.
 
 
-- **Waiting for an EPUB in Readest:** Confirm the matching edition is in Readest Cloud and the Kindle copy is in your Send to Kindle library.
+- **Waiting for an EPUB:** Upload the matching edition to Placekeeper and the Kindle copy is in your Send to Kindle library.
 - **Missing X4 progress:** Check the filename and matching mode, then open the book on the X4 and select **Sync Progress**.
 - **Libby title or chapters could not be matched:** Check that the active loan is the same book and author. Audio sync needs a compatible chapter sequence.
 - **Connection failed:** Check **Setup**, your network, and your device’s cloud sync. The providers’ unofficial endpoints may change.
@@ -96,7 +96,7 @@ The page runs this step on demand. A separate `python -m placekeeper.sync.onboar
 
 Titles narrow candidate EPUBs; metadata alone never establishes a match. Acceptance requires identical normalized reading text, 120 distributed unique context matches in each direction, and at least 95% of 40 coordinate round trips. Quarantined books are retried when the catalog changes. Title metadata with no plausible candidate waits instead of bulk-downloading unrelated documents.
 
-The X4 identity adapter currently assumes the confirmed filename-MD5 mode and Readest downloads named `Title.epub`. Renaming the X4 file or changing its hash mode requires another identity adapter.
+The X4 identity adapter currently assumes the confirmed filename-MD5 mode and the provided download filename (legacy Readest downloads use `Title.epub`). Renaming the X4 file or changing its hash mode requires another identity adapter.
 
 Private output:
 
@@ -110,7 +110,7 @@ Paths below are relative to the Placekeeper data directory.
 
 Automatically generated profiles remain marked `ready_for_dry_run`; this records structural validation, not a per-book physical handoff test. The Sync page can apply handoffs on demand, and enabling automatic progress sync in Setup allows scheduled handoffs.
 
-Library pagination must complete before the cursor is committed. Cache changes trigger rebuilds. Unchanged Readest EPUBs are reused, and successful audiobook chapter validation is cached by the EPUB fingerprint and chapter timings; changed inputs trigger revalidation. File fingerprints are streamed to avoid loading entire books just to hash them. Removed or newly ambiguous matches leave the ready registry. Only one manual job runs at a time, and every handoff rechecks the connected readers before writing.
+Library pagination must complete before the cursor is committed. Cache changes trigger rebuilds. Unchanged library EPUBs are reused, and successful audiobook chapter validation is cached by the EPUB fingerprint and chapter timings; changed inputs trigger revalidation. File fingerprints are streamed to avoid loading entire books just to hash them. Removed or newly ambiguous matches leave the ready registry. Only one manual job runs at a time, and every handoff rechecks the connected readers before writing.
 
 To preview a handoff using the same planner as **Sync now**:
 
@@ -203,3 +203,24 @@ the same book. A separately imported edition can appear as another entry.
 Discovery can still list a removed title found in your libraries, but it will not
 restore it to active syncing. The discovery results list is collapsed by default;
 use **Discovered books** to show or hide it. Polling does not reopen the list.
+
+### Local EPUB library and X4 downloads
+
+Readest is optional. On the Sync page, choose an EPUB and select **Upload book**.
+Files are stored privately under `<data-root>/library`, with a 64 MiB upload limit.
+Uploads stream to disk; expanded archives are limited to 256 MiB and 10,000 entries.
+Identical uploads reuse the same library entry. Uploads do not change reading positions.
+
+Add `http://<your-pi-address>:8780/opds` under your X4's **OPDS Servers** settings.
+Open its OPDS browser and download the book. Keep the supplied filename and enable
+filename-based document matching, then open the book and choose **Sync Progress**.
+Select **Find new books** in Placekeeper to build the matches and maps.
+The catalog shows a short edition suffix to preserve a stable filename; title and author
+inside the EPUB stay unchanged. The X4 must be able to reach the Pi; normally use its LAN address while at home.
+The Placekeeper upload page remains accessible over your existing WireGuard VPN.
+The OPDS feed and EPUB downloads use the same private-network restrictions as the app.
+
+Kindle personal documents still need to be sent through Send to Kindle separately.
+Existing Readest connections and maps continue to work; disconnecting Readest does
+not delete uploaded EPUBs. For existing X4 books, downloading an uploaded copy with
+its new filename creates a separate X4 progress identity, so sync the new copy once.

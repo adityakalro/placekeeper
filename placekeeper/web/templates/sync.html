@@ -37,6 +37,19 @@
   <p id="bookFeedback" role="status" class="meta"></p>
 </section>
 <section class="card">
+  <h2>EPUB library</h2>
+  <p class="muted">Upload an EPUB here. Download it to your phone for transfer to the X4, or use the X4 OPDS catalog. Keep the downloaded filename. Readest is optional.</p>
+  <label for="epubFile">EPUB file (up to 64 MiB)</label><input id="epubFile" type="file" accept=".epub,application/epub+zip">
+  <button id="uploadEpub" class="primary secondary">Upload book</button>
+  <p id="uploadFeedback" role="status" class="meta"></p>
+  <p id="libraryMessage" class="muted" role="status">Loading your EPUBs…</p>
+  <table id="libraryTable" class="sync-results" aria-label="Uploaded EPUBs" hidden>
+    <thead><tr><th scope="col">Book</th><th scope="col">Download</th></tr></thead>
+    <tbody id="libraryBooks"></tbody>
+  </table>
+  <p class="muted">X4 catalog address: <a id="opdsUrl" href="/opds">/opds</a>. Add it under Settings → OPDS Servers on your X4. Downloaded books must keep their filename.</p>
+</section>
+<section class="card">
   <h2>Book discovery</h2>
   <p class="muted">Find and map new books so their progress can sync.</p>
   <button id="discover" class="primary secondary" disabled>Find new books</button>
@@ -243,4 +256,44 @@ bindJob('sync','/api/sync');
 bindJob('discover','/api/discover');
 document.addEventListener('visibilitychange',()=>{clearTimeout(pollTimer);if(!document.hidden)refresh();});
 refresh();
-</script></html>
+</script>
+
+<script nonce="NONCE">
+const catalogLink=document.getElementById('opdsUrl');catalogLink.textContent=location.origin+'/opds';
+async function loadLibrary(){
+  const message=document.getElementById('libraryMessage'),table=document.getElementById('libraryTable');
+  try{
+    const response=await fetch('/api/library');
+    if(!response.ok)throw Error('Could not load the EPUB library. Reload this page to try again.');
+    const result=await response.json(),body=document.getElementById('libraryBooks');
+    body.replaceChildren();
+    for(const book of result.books){
+      const row=document.createElement('tr'),title=document.createElement('td'),action=document.createElement('td');
+      const name=document.createElement('strong');name.textContent=book.title;title.append(name);
+      if(book.author){const author=document.createElement('div');author.className='muted';author.textContent=book.author;title.append(author);}
+      const link=document.createElement('a');link.className='primary secondary';link.textContent='Download';
+      link.href='/epubs/'+encodeURIComponent(book.id)+'/'+encodeURIComponent(book.filename);
+      link.download=book.filename;link.setAttribute('aria-label','Download '+book.title);
+      action.append(link);row.append(title,action);body.append(row);
+    }
+    table.hidden=result.books.length===0;
+    message.textContent=result.books.length?'On iPhone, choose Download, then save the EPUB to Files. Keep its filename when uploading it to the X4.':'No EPUBs uploaded yet.';
+  }catch(error){message.textContent=error.message;}
+}
+loadLibrary();
+document.getElementById('uploadEpub').addEventListener('click',async()=>{
+  const button=document.getElementById('uploadEpub'),message=document.getElementById('uploadFeedback');
+  const file=document.getElementById('epubFile').files[0];
+  if(!file){message.textContent='Choose an EPUB first.';return;}
+  if(file.size>64*1024*1024){message.textContent='EPUBs must be no larger than 64 MiB.';return;}
+  button.disabled=true;message.textContent='Uploading…';
+  try{
+    const response=await fetch('/api/library/upload',{method:'POST',headers:{'Content-Type':'application/epub+zip','X-Placekeeper':'CSRF'},body:file});
+    const result=await response.json();if(!response.ok)throw Error(result.error||'Upload failed.');
+    message.textContent='Uploaded '+result.title+'. Download it on your X4, then choose Find new books.';
+    document.getElementById('epubFile').value='';
+    await loadLibrary();
+  }catch(error){message.textContent=error.message;}finally{button.disabled=false;}
+});
+</script>
+</html>

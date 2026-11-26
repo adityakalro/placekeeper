@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 import secrets
 import threading
+import shutil
+from urllib.parse import urlsplit
 from time import monotonic, time
 
 from placekeeper.sync.worker import run_worker
@@ -256,6 +258,15 @@ def handler_for(jobs,hosts,networks):
     class Handler(BaseHTTPRequestHandler):
         timeout=15
         def log_message(self,*_):pass
+        def log_request(self, code='-', size='-'):
+            # Catalog diagnostics omit query strings, credentials and book paths.
+            if not hasattr(self,'path'):
+                tls=getattr(self,'raw_requestline',b'').startswith(b'\x16\x03')
+                print('Catalog invalid HTTP request tls='+str(tls),flush=True)
+                return
+            path=urlsplit(self.path).path
+            if path in ('/', '/opds', '/opds/'):
+                print('Catalog HTTP '+path+' status='+str(code)+' host='+self.headers.get('Host','')[:100],flush=True)
         def allowed(self):
             try:ip=ipaddress.ip_address(self.client_address[0])
             except ValueError:return False
@@ -276,6 +287,29 @@ def handler_for(jobs,hosts,networks):
                 nonce=secrets.token_urlsafe(24)
                 page=SETUP_PAGE if self.path=='/setup' else PAGE
                 self.send(200,page.replace('NONCE',nonce).replace('CSRF',csrf),'text/html',nonce)
+            elif urlsplit(self.path).path in ('/opds','/opds/'):
+                from placekeeper.plugins.library.catalog import feed
+                self.send(200,feed(jobs.root),'application/atom+xml;profile=opds-catalog;kind=acquisition')
+            elif self.path.startswith('/epubs/'):
+                from placekeeper.plugins.library.storage import book_path, records
+                parts=urlsplit(self.path).path.split('/')
+                try:
+                    if len(parts)!=4:raise ValueError('Unknown EPUB.')
+                    path=book_path(jobs.root,parts[2])
+                    if not path.is_file():raise ValueError('Unknown EPUB.')
+                    book=next(b for b in records(jobs.root) if b['id']==parts[2])
+                except (ValueError,StopIteration):self.send(404,{'error':'Not found'});return
+                self.send_response(200)
+                self.send_header('Content-Type','application/epub+zip')
+                self.send_header('Content-Length',str(path.stat().st_size))
+                from urllib.parse import quote
+                self.send_header('Content-Disposition',"attachment; filename*=UTF-8''"+quote(book['filename']))
+                self.send_header('X-Content-Type-Options','nosniff')
+                self.end_headers()
+                with path.open('rb') as source:shutil.copyfileobj(source,self.wfile,65536)
+            elif self.path=='/api/library':
+                from placekeeper.plugins.library.storage import records
+                self.send(200,{'books':records(jobs.root)})
             elif self.path=='/api/status':self.send(200,jobs.status())
             elif self.path=='/api/health':
                 jobs.check_health()
@@ -287,6 +321,19 @@ def handler_for(jobs,hosts,networks):
             if (self.headers.get('Origin')!='http://'+self.headers.get('Host','')
                     or not secrets.compare_digest(self.headers.get('X-Placekeeper',''),csrf)):
                 self.send(403,{'error':'Reload this page and try again.'});return
+            if self.path=='/api/library/upload':
+                from placekeeper.plugins.library.storage import save
+                if not jobs.lock.acquire(blocking=False):
+                    self.send(409,{'error':'Wait for the current job to finish.'});return
+                try:
+                    if self.headers.get('Content-Type')!='application/epub+zip':raise ValueError('Choose an EPUB file.')
+                    size=int(self.headers.get('Content-Length','0'))
+                    with onboarding_lock(jobs.root):book=save(jobs.root,self.rfile,size)
+                    self.send(201,book)
+                except ValueError as e:self.close_connection=True;self.send(400,{'error':str(e)})
+                except OSError:self.close_connection=True;self.send(500,{'error':'Could not store the EPUB.'})
+                finally:jobs.lock.release()
+                return
             try:
                 size=int(self.headers.get('Content-Length','0'))
                 if not 0<size<=8192:raise ValueError('Invalid request size')

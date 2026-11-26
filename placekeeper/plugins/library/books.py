@@ -8,7 +8,7 @@ from placekeeper.errors import ReadFailure
 from placekeeper.plugins.contracts import Book
 from placekeeper.plugins.kindle.loan_discovery import MetadataIndex, active_loans, loan_authors, x4_loans
 from placekeeper.storage import file_sha256, private_json
-from .client import ReadestSource
+from placekeeper.plugins.library.source import LibrarySource
 
 
 def discover(root, connected):
@@ -17,7 +17,7 @@ def discover(root, connected):
     registry_path = root/'reader-books.json'
     saved = json.loads(registry_path.read_text()) if registry_path.exists() else {'books': []}
     previous = {entry['id']: entry for entry in saved['books']}
-    with closing(ReadestSource(root/'readest-device.json')) as source:
+    with closing(LibrarySource(root)) as source:
         catalog = source.books()
         loans = active_loans(root)
         shared = x4_loans(root, catalog, loans)
@@ -35,7 +35,7 @@ def discover(root, connected):
                 fingerprint = file_sha256(epub)
             entries.append({'title': book['title'], 'id': book['id'], 'epub': str(epub.resolve()),
                             'sha256': fingerprint,
-                            'crosspoint': md5((book['title']+'.epub').encode()).hexdigest(),
+                            'crosspoint': md5((book.get('filename', book['title']+'.epub')).encode()).hexdigest(),
                             'libby': matches[0]})
     private_json(root/'reader-books.json', {'books': entries})
     return {'matches': [{'title': item['title'], 'status': 'ready',
@@ -64,7 +64,7 @@ def books(root):
         if entry['sha256'] in mapped:
             continue
         if not epub.is_file() or file_sha256(epub) != entry['sha256']:
-            yield ReadFailure('The Readest EPUB changed. Run Find new books again.')
+            yield ReadFailure('The library EPUB changed. Run Find new books again.')
             continue
         yield Book('readest:'+entry['id'], entry['title'], entry['sha256'],
                    {'crosspoint': entry['crosspoint']}, epub)

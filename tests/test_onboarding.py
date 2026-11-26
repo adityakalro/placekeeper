@@ -73,6 +73,21 @@ class OnboardingTests(unittest.TestCase):
     def engine(self):
         return Onboarder(self.root,'unused-auth','unused-parser',self.source,self.catalog)
 
+    def test_uploaded_epub_maps_without_readest(self):
+        from placekeeper.plugins.library.storage import save
+        from placekeeper.plugins.library.source import LibrarySource
+        import io
+        data=(Path(__file__).parent/'fixtures/Placekeeper Progress Test.epub').read_bytes()
+        book=save(self.root,io.BytesIO(data),len(data))
+        self.source=LibrarySource(self.root)
+        try:
+            report=self.engine().run_once()
+            self.assertEqual(report['events'][0]['status'],'ready')
+            profile=json.loads(Path(self.engine().state['jobs'][DOC]['profile']).read_text())
+            self.assertEqual(profile['x4_filename'],book['filename'])
+            self.assertEqual(profile['crosspoint_document'],md5(book['filename'].encode()).hexdigest())
+        finally:self.source.close()
+
     def test_loan_discovery_checks_x4_before_kindle_and_reports_store_mapping_failure(self):
         store_title = 'Second Novel'
         missing_title = 'Third Novel'

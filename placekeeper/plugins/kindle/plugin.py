@@ -62,4 +62,4 @@ PLUGIN = Plugin('kindle', 'Kindle', FILES,
     reader_session=deferred(__package__+'.reader', 'reader_session'),
     books=deferred(__package__+'.legacy_catalog', 'books'),
     discover=deferred(__package__+'.legacy_catalog', 'discover'),
-    disconnect=deferred(__package__+'.legacy_catalog', 'invalidate'), catalog_requires=('readest',))
+    disconnect=deferred(__package__+'.legacy_catalog', 'invalidate'), catalog_requires=())

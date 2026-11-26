@@ -19,7 +19,7 @@ class Connections:
         return {
             key: {'label': plugin.label, 'description': plugin.description, 'actions': plugin.actions,
                   'connected': key in services,
-                  'can_disconnect': key in services or any((self.root/file).exists() for file in plugin.files)
+                  'can_disconnect': (key in services and bool(plugin.files or plugin.disconnect)) or any((self.root/file).exists() for file in plugin.files)
                   or (self.pending/(key + '.json')).exists()}
             for key, plugin in self.plugins.items()
         }
