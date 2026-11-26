@@ -6,7 +6,7 @@ import json
 import httpx
 
 from placekeeper.errors import MissingProgress
-from placekeeper.mapping.text import epub_index, epub_position_details
+from placekeeper.mapping.text import epub_position_details
 from placekeeper.plugins.contracts import Observation
 from placekeeper.plugins.transport import check_write, json_reader
 from .client import crosspoint_progress, is_own_progress, read_progress, write_progress
@@ -31,7 +31,9 @@ class CrossPointReader:
         if type(stamp) not in (int, float) or stamp <= 0:
             stamp = None
         own = is_own_progress(data.get('device_id'), data.get('device'))
-        return Observation(native, self.coordinates.at_or_after(native), stamp, own=own)
+        anchor = self.coordinates.at_or_after(native)
+        return Observation(native, anchor, stamp, own=own,
+                           fraction=anchor/max(1, len(self.coordinates)-1))
 
     def equivalent(self, first, second):
         return first == second
@@ -60,7 +62,7 @@ def reader_session(root):
             if not binding or book.epub is None:
                 yield None
                 return
-            coordinates = book.mapper.epub.coordinates if book.mapper else epub_index(book.epub).coordinates
+            coordinates = book.coordinates
             client, headers = connect()
             yield CrossPointReader(client, headers, binding, book.epub, coordinates)
 

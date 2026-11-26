@@ -9,6 +9,7 @@ from time import time
 from placekeeper.errors import MissingProgress, ReadFailure, UnsupportedMapping
 from placekeeper.storage import private_json
 from placekeeper.sync.planner import plan
+from placekeeper.sync.book_status import automatic_status, skipped as paused_result
 
 
 def observe(readers, state, pool, mapping_skips):
@@ -54,11 +55,11 @@ def reconcile(state, observations):
     state.pop('pending')
 
 
-def execute(readers, state, path, dry_run=False, *, skipped=None):
+def execute(readers, state, path, dry_run=False, *, skipped=None, mode='reading'):
     with ThreadPoolExecutor(max_workers=3) as pool:
         skipped = {} if skipped is None else skipped
         mapping_skips = {}
-        result = execute_plan(readers, state, path, dry_run, pool, mapping_skips)
+        result = execute_plan(readers, state, path, dry_run, pool, mapping_skips, mode)
     skipped.update(mapping_skips)
     if skipped:
         result['skipped_readers'] = skipped
@@ -66,7 +67,7 @@ def execute(readers, state, path, dry_run=False, *, skipped=None):
     return result
 
 
-def execute_plan(readers, state, path, dry_run, pool, mapping_skips):
+def execute_plan(readers, state, path, dry_run, pool, mapping_skips, mode):
     writes = 0
     outcomes = {}
     try:
@@ -75,6 +76,10 @@ def execute_plan(readers, state, path, dry_run, pool, mapping_skips):
             reconcile(state, positions)
             if not dry_run:
                 private_json(path, state)
+        if mode == 'automatic':
+            status = automatic_status(positions)
+            if status != 'reading':
+                return paused_result(status)
         source, targets, message = plan(readers, positions, state['receipts'], state.get('handoff'), mapping_skips)
         if source is not None and not targets and not dry_run and 'handoff' in state:
             state.pop('handoff')
@@ -123,7 +128,11 @@ def execute_plan(readers, state, path, dry_run, pool, mapping_skips):
                 'message': str(error) if isinstance(error, ReadFailure) else 'Could not complete this book’s sync.'}
 
 
-def sync_book(root, book, plugins, dry_run=False):
+def sync_book(root, book, plugins, dry_run=False, *, mode='automatic'):
+    if mode in ('not_started', 'finished', 'paused'):
+        return paused_result(mode)
+    if book.load_mapper is not None and book.mapper is None:
+        book.mapper = book.load_mapper()
     path = Path(root) / 'progress' / (sha256(book.key.encode()).hexdigest() + '.json')
     existing = path.exists()
     if existing:
@@ -152,4 +161,4 @@ def sync_book(root, book, plugins, dry_run=False):
                 continue
             if session is not None:
                 readers[key] = session
-        return execute(readers, state, path, dry_run, skipped=skipped)
+        return execute(readers, state, path, dry_run, skipped=skipped, mode=mode)

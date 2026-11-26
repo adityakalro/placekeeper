@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
+import os
 from pathlib import Path
 import sys
 import time
@@ -103,7 +104,7 @@ def extract_chapters(document, auth_path, parser_path):
         from kfxlib.utilities import DataFile
         from kfxlib.yj_book import YJ_Book
 
-        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+        with open(os.devnull, 'w') as logs, redirect_stdout(logs), redirect_stderr(logs):
             phase = 'reading voucher'
             voucher = DrmIonVoucher(io.BytesIO(voucher_data), serial, '')
             voucher.parse()

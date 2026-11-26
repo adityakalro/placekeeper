@@ -14,6 +14,16 @@
   </table>
   <p class="meta" id="time"></p>
 </section>
+<section class="card" aria-labelledby="booksTitle">
+  <h2 id="booksTitle">Your books</h2>
+  <p class="muted">Automatic pauses books in the first 0.1% or at least 99.5% complete. Choose Reading to keep syncing, or pause a book yourself. Settings apply to Sync now and scheduled sync.</p>
+  <p id="booksEmpty" class="empty">Run Sync now to list your mapped books.</p>
+  <table class="sync-results" id="booksTable" hidden>
+    <thead><tr><th scope="col">Book</th><th scope="col">Sync status</th></tr></thead>
+    <tbody id="bookControls"></tbody>
+  </table>
+  <p id="bookFeedback" role="status" class="meta"></p>
+</section>
 <section class="card">
   <h2>Book discovery</h2>
   <p class="muted">Find and map new books so their progress can sync.</p>
@@ -27,7 +37,39 @@
 const csrf='CSRF';
 const $=id=>document.getElementById(id);
 async function call(path,body){const r=await fetch(path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json','X-Placekeeper':csrf}:{},body:body?JSON.stringify(body):undefined,cache:'no-store'});const d=await r.json();if(!r.ok)throw Error(d.error||'Connection failed');return d;}
+function renderBooks(s){
+  const list=$('bookControls');
+  if(list.contains(document.activeElement))return;
+  list.replaceChildren();
+  const books=s.books||[];
+  $('booksEmpty').hidden=books.length>0;
+  $('booksTable').hidden=books.length===0;
+  const labels={automatic:'Automatic',reading:'Reading',not_started:'Not started',finished:'Finished',paused:'Paused'};
+  for(const book of books){
+    const row=list.insertRow();
+    const title=document.createElement('th');title.scope='row';title.textContent=book.title;row.append(title);
+    const cell=row.insertCell();
+    const select=document.createElement('select');
+    select.setAttribute('aria-label','Sync status for '+book.title);
+    for(const [value,label] of Object.entries(labels)){
+      const option=document.createElement('option');option.value=value;option.textContent=label;select.append(option);
+    }
+    select.value=book.mode;select.disabled=s.running;
+    select.addEventListener('change',async()=>{
+      select.disabled=true;
+      try{await call('/api/book-status',{key:book.key,mode:select.value});$('bookFeedback').textContent='Saved status for '+book.title+'.';}
+      catch(e){select.value=book.mode;$('bookFeedback').textContent=e.message;}
+      finally{select.disabled=false;select.blur();await refresh();}
+    });
+    cell.append(select);
+    if(book.mode==='automatic'){
+      const detail=document.createElement('div');detail.className='meta';
+      detail.textContent='Last detected: '+(labels[book.reading_status]||'Not checked');cell.append(detail);
+    }
+  }
+}
 function render(s){
+  renderBooks(s);
   $('setupNotice').hidden=s.connected;
   $('sync').disabled=!s.connected||s.running;
   $('discover').disabled=!s.can_discover||s.running;

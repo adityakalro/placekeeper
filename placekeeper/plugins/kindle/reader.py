@@ -24,12 +24,13 @@ class KindleReader:
         position = kindle_position(self.sidecar, self.document, self.kind)
         coordinates = self.mapper.epub.coordinates
         anchor = coordinates.at_or_after(self.mapper.from_sidecar(position)['xpointer'])
+        fraction = anchor/max(1, len(coordinates)-1)
         receipt, pending = hint['receipt'], hint['pending']
         if receipt and receipt['position'] == position:
-            return Observation(position, anchor, receipt['stamp'], own=True)
+            return Observation(position, anchor, receipt['stamp'], own=True, fraction=fraction)
         if pending and pending['target'] == position:
-            return Observation(position, anchor, pending['stamp'], own=True)
-        return Observation(position, anchor)
+            return Observation(position, anchor, pending['stamp'], own=True, fraction=fraction)
+        return Observation(position, anchor, fraction=fraction)
 
     def bucket(self, anchor):
         return self.mapper.from_xpointer(self.mapper.epub.coordinates[anchor])['sidecar_range']

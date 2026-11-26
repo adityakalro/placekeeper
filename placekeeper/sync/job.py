@@ -4,7 +4,8 @@ from contextlib import ExitStack
 from dataclasses import replace
 
 from placekeeper.errors import ReadFailure
-from placekeeper.storage import onboarding_lock
+from placekeeper.storage import onboarding_lock, private_json
+from placekeeper.sync import book_status
 from placekeeper.sync.engine import sync_book
 
 
@@ -36,6 +37,7 @@ def run_books(root, plugins, notify, *, dry_run=False):
 
 def run_catalogs(root, plugins, readers, notify, dry_run):
     results = []
+    statuses = book_status.load(root)
     seen = set()
     for key, plugin in plugins.items():
         if not plugin.catalog_ready(plugins):
@@ -50,14 +52,25 @@ def run_catalogs(root, plugins, readers, notify, dry_run):
                 seen.add(book.key)
                 notify('Syncing ' + book.title + '…')
                 try:
-                    result = sync_book(root, book, readers, dry_run=dry_run)
+                    result = sync_book(root, book, readers, dry_run=dry_run,
+                                       mode=statuses.get(book.key, {}).get('mode', 'automatic'))
                 except Exception as error:
                     message = str(error) if isinstance(error, ReadFailure) else 'Could not open the book or a connected reader.'
                     result = error_result(book.title, message)
+                finally:
+                    book.release()
                 if result.get('source') in plugins:
                     source = result['source']
                     result['message'] = result['message'].replace(source + ' →', plugins[source].label + ' →', 1)
-                results.append({'title': book.title, **result})
+                if not dry_run:
+                    previous = statuses.get(book.key, {})
+                    statuses[book.key] = {'key': book.key, 'title': book.title,
+                        'mode': previous.get('mode', 'automatic'),
+                        'reading_status': result.get('reading_status',
+                            'reading' if result['status'] not in ('error', 'unconfirmed') else previous.get('reading_status', 'unknown'))}
+                    private_json(root/'book-status.json', statuses)
+                results.append({'key': book.key, 'title': book.title, **result})
+                del book
         except Exception:
             results.append(error_result(plugin.label, 'Could not load the book catalog.'))
     return results

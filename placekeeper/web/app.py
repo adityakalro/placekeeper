@@ -12,7 +12,8 @@ from time import monotonic
 
 import httpx
 
-from placekeeper.sync.job import refresh_libraries, run_books
+from placekeeper.sync.worker import run_worker
+from placekeeper.sync import book_status
 from placekeeper.web.setup import Connections
 from placekeeper.errors import ReadFailure
 from placekeeper.storage import default_data_root, onboarding_lock, private_json, state_lock
@@ -28,6 +29,7 @@ class Jobs:
         self.root.mkdir(mode=0o700,parents=True,exist_ok=True)
         self.connections=Connections(self.root,plugins)
         self.custom_jobs=onboard is not None or sync is not None
+        self.use_worker=not self.custom_jobs and plugins is None
         self.lock=threading.Lock()
         self.running_job=None
         self.phase='Ready'
@@ -56,16 +58,32 @@ class Jobs:
                    for plugin in plugins.values())
 
     def status(self):
-        return {'connected':self.connections.ready(), 'services':self.connections.status(),
+        return {'books': list(book_status.load(self.root).values()),
+                'connected':self.connections.ready(), 'services':self.connections.status(),
                 'can_discover':self.discovery_ready(), 'running_job':self.running_job,
                 'running':self.running,'phase':self.phase,'last':self.last,
                 'last_discovery':self.last_discovery,'schedule_enabled':self.schedule_enabled, 'discovery_enabled':self.discovery_enabled}
 
     def discover(self):
+        if self.use_worker:
+            return run_worker(self.root, 'discovery', lambda phase:setattr(self, 'phase', phase))
+        from placekeeper.sync.job import refresh_libraries
         return refresh_libraries(self.root,self.connections.connected())
 
     def sync_books(self,notify):
+        if self.use_worker:
+            return run_worker(self.root, 'progress', notify)
+        from placekeeper.sync.job import run_books
         return run_books(self.root,self.connections.connected(),notify)
+
+    def set_book_status(self, key, mode):
+        if not self.lock.acquire(blocking=False):
+            raise ValueError('Wait for the current job to finish.')
+        try:
+            with state_lock(self.root/'manual-sync-job'), onboarding_lock(self.root):
+                book_status.save_mode(self.root, key, mode)
+        finally:
+            self.lock.release()
 
     def set_schedule(self, enabled, discovery_enabled=None):
         if type(enabled) is not bool:
@@ -230,6 +248,11 @@ def handler_for(jobs,hosts,networks):
                 except (ValueError,ReadFailure) as e:self.send(400,{'error':str(e)});return
                 except (httpx.HTTPError,OSError,KeyError,TypeError):self.send(502,{'error':'Could not complete setup. Check the service and try again.'});return
                 self.send(200,result)
+            elif self.path=='/api/book-status':
+                try:jobs.set_book_status(data.get('key'), data.get('mode'))
+                except ValueError as e:self.send(400,{'error':str(e)});return
+                except OSError:self.send(500,{'error':'Could not save book status.'});return
+                self.send(200,{'saved':True})
             elif self.path=='/api/schedule':
                 try:jobs.set_schedule(data.get('enabled'), data.get('discovery_enabled'))
                 except ValueError as e:self.send(400,{'error':str(e)});return

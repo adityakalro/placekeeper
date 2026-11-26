@@ -3,7 +3,6 @@ from contextlib import ExitStack, closing, contextmanager
 
 from placekeeper.errors import MissingProgress, UnsupportedMapping
 from placekeeper.mapping.chapters import ChapterMap
-from placekeeper.mapping.text import epub_index
 from placekeeper.plugins.contracts import Observation
 from .client import Libby, elapsed
 
@@ -35,7 +34,8 @@ class LibbyReader:
         elif stamp >= 100_000_000_000:
             stamp /= 1000
         return Observation(native, self.coordinates.at_or_after(coordinate), stamp,
-                           own=marker.get('deviceId') == self.libby.state.get('chipId'))
+                           own=marker.get('deviceId') == self.libby.state.get('chipId'),
+                           fraction=native/self.timing['duration'])
 
     def target(self, anchor, current):
         try:
@@ -80,7 +80,7 @@ def reader_session(root):
                 return
             player, url, timing = libby.open_player(loan)
             with closing(player):
-                coordinates = book.mapper.epub.coordinates if book.mapper else epub_index(book.epub).coordinates
+                coordinates = book.coordinates
                 try:
                     chapters = ChapterMap(book.epub, coordinates, timing)
                 except ValueError:

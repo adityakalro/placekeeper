@@ -1,6 +1,7 @@
 """Contracts for trusted, locally installed Placekeeper plugins."""
 from dataclasses import dataclass, field
 from pathlib import Path
+from functools import cached_property
 from typing import Callable, Protocol
 
 Native = int | str
@@ -16,6 +17,21 @@ class Book:
     epub: Path | None = None
     mapper: object | None = None
     initial_state: Callable | None = None
+    load_mapper: Callable | None = None  # optional deferred validation/index loading
+
+    def release(self):
+        if self.load_mapper is not None:
+            self.mapper = None
+        self.__dict__.pop('coordinates', None)
+
+    @cached_property
+    def coordinates(self):
+        if self.mapper is not None:
+            return self.mapper.epub.coordinates
+        if self.epub is None:
+            raise ValueError('This book has no EPUB coordinates')
+        from placekeeper.mapping.text import epub_index
+        return epub_index(self.epub).coordinates
 
 
 @dataclass(frozen=True)
@@ -25,6 +41,7 @@ class Observation:
     stamp: float | None = None
     precision_seconds: float = 0
     own: bool = False
+    fraction: float | None = None
 
 
 class Reader(Protocol):

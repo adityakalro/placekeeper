@@ -1,9 +1,12 @@
 import contextlib
+import gc
 from hashlib import md5
 import json
 from pathlib import Path
 import shutil
 import tempfile
+import subprocess
+import weakref
 from threading import Barrier
 import unittest
 from unittest.mock import Mock, patch
@@ -198,6 +201,23 @@ class OnboardingTests(unittest.TestCase):
             self.engine().run_once()
             self.assertEqual(extract.call_count, 2)
 
+    def test_ambiguous_candidates_do_not_retain_their_text_indexes(self):
+        self.source.items += [{'id': letter*28, 'title': TITLE, 'author': 'Placekeeper'}
+                              for letter in ('b', 'c')]
+        references = []
+        def build(path):
+            if len(references) == 2:
+                gc.collect()
+                self.assertTrue(all(reference() is None for reference in references))
+            index = epub_index(path)
+            references.append(weakref.ref(index))
+            return index
+        with patch('placekeeper.plugins.kindle.onboarding.epub_index', new=build):
+            report = self.engine().run_once()
+        self.assertEqual(report['events'][0]['status'], 'needs_review')
+        self.assertEqual(len(references), 3)
+        self.assertTrue(all(reference() is None for reference in references))
+
     def test_same_text_multiple_epubs_is_quarantined(self):
         self.source.items.append({'id':'b'*28,'title':TITLE,'author':'Placekeeper'})
         self.assertEqual(self.engine().run_once()['events'][0]['status'],'needs_review')
@@ -248,6 +268,24 @@ class OnboardingTests(unittest.TestCase):
         self.engine().run_once();self.catalog.documents={}
         self.engine().run_once()
         self.assertEqual(json.loads((self.root/'ready-profiles.json').read_text())['profiles'],[])
+
+
+class ExtractionProcessTests(unittest.TestCase):
+    def test_extraction_and_discovery_discard_unused_subprocess_output(self):
+        from placekeeper.plugins.kindle.legacy_catalog import discover
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            engine = Onboarder(root/'onboarding', 'unused-auth', 'unused-parser', None, None)
+            private_json(root/'onboarding/last-run.json', {'events': [{'status': 'ready'}]})
+            with patch('placekeeper.plugins.kindle.onboarding.subprocess.run',
+                       return_value=Mock(returncode=0)) as run:
+                engine.extract(DOC, root/'book')
+                self.assertEqual(discover(root, {'kindle', 'readest'}), {'ready': 1})
+            self.assertEqual(run.call_count, 2)
+            for call in run.call_args_list:
+                self.assertEqual(call.kwargs['stdout'], subprocess.DEVNULL)
+                self.assertEqual(call.kwargs['stderr'], subprocess.DEVNULL)
+                self.assertNotIn('capture_output', call.kwargs)
 
 
 class PaginationTests(unittest.TestCase):

@@ -1,6 +1,6 @@
 """Check protocol behavior in the production progress clients."""
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 from xml.etree import ElementTree
 
 import httpx
@@ -63,6 +63,8 @@ class ProgressClientTests(unittest.TestCase):
 
     def test_kindle_store_position_works_without_timestamp_and_recognizes_pending_write(self):
         mapper = Mock()
+        mapper.epub.coordinates = MagicMock()
+        mapper.epub.coordinates.__len__.return_value = 100
         mapper.from_sidecar.return_value = {'xpointer': P1}
         mapper.epub.coordinates.at_or_after.return_value = 1
         reader = KindleReader(Mock(), None, 'book', mapper, 'EBOK')

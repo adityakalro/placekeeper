@@ -34,6 +34,30 @@ class PageTests(unittest.TestCase):
         jobs.start.assert_not_called()
         jobs.setup_action.assert_not_called()
 
+    def test_book_status_api_requires_token_and_saves_override(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            private_json(root/'book-status.json', {'book': {'key': 'book', 'title': 'Title',
+                         'mode': 'automatic', 'reading_status': 'reading'}})
+            jobs = Jobs(root)
+            h = self.handler(jobs, '/', origin='http://127.0.0.1:8780',
+                             body=b'{"key":"book","mode":"finished"}')
+            h.do_GET()
+            token = re.search(rb"const csrf='([^']+)'", h.wfile.getvalue())[1].decode()
+            h.path = '/api/book-status'
+            h.do_POST()
+            self.assertEqual(h.code, 403)
+            h.headers['X-Placekeeper'] = token
+            h.do_POST()
+            self.assertEqual(h.code, 200)
+            self.assertEqual(jobs.status()['books'][0]['mode'], 'finished')
+            jobs.lock.acquire()
+            try:
+                with self.assertRaises(ValueError):
+                    jobs.set_book_status('book', 'reading')
+            finally:
+                jobs.lock.release()
+
     def test_public_sources_and_unexpected_hosts_are_rejected(self):
         for opts in ({'ip':'203.0.113.9'},{'host':'evil.example:8780'}):
             h=self.handler(Mock(),'/api/status',**opts);h.do_GET();self.assertEqual(h.code,403)

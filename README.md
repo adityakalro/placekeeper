@@ -124,6 +124,8 @@ The preview uses the connected services and mapped books from your installation.
 
 Service adapters live in `placekeeper/plugins/`. The sync jobs in `placekeeper/sync/` match books and decide which positions to update. Shared text and chapter maps live in `placekeeper/mapping/`, and the web server and templates live in `placekeeper/web/`. Tests and synthetic fixtures are under `tests/`, and systemd units and configuration examples are under `deploy/`.
 
+The [memory efficiency notes](docs/performance.md) describe worker isolation, deferred map loading, shared indexes, and measured DietPi results.
+
 Add a reader or catalog by installing a plugin package. The [plugin guide](docs/plugins.md) describes the contract and shows how to test a fourth reader.
 
 ## Tests and privacy
@@ -139,3 +141,21 @@ See [sharing guide](docs/sharing.md) for the publication boundary. The implement
 Protocol references: [Kindle registration research](https://github.com/mkb79/kindle), [personal-document KFX delivery](https://github.com/kafkasl/ksync), [Readest reader APIs](https://github.com/readest/readest/tree/main/apps/readest-app/src/app/api/crosspoint), and [CrossPoint Sync API](https://github.com/crosspoint-reader/crosspoint-sync/blob/main/docs/API.md).
 
 Chapter mapping can approximate compatible Send to Kindle editions when their texts differ slightly. Discovery matches every numbered EPUB chapter start to unique Kindle text, then estimates progress within each matched chapter. Audiobook validation checks the numbered chapter sequence and samples each chapter in both directions.
+
+## Pausing individual books
+
+After a progress sync, the Sync page's **Your books** table lists mapped books.
+Each book defaults to **Automatic**: Placekeeper pauses progress writes when any
+available reader is at least 99.5% complete, or every available position with a
+known completion fraction is within the first 0.1% and no position has unknown
+completion. These are estimates from text position or audiobook elapsed time;
+appendices and introductions can affect the result. Missing progress alone does
+not establish that a book is unstarted.
+
+Choose **Reading** to bypass automatic detection, or **Not started**, **Finished**,
+or **Paused** to prevent syncing that book. These overrides apply to both manual
+and scheduled progress sync. Automatic mode checks positions on later runs and
+resumes when they leave the paused range. Manual pauses remain until changed and
+skip reader sessions. Discovery keeps the book's mapping available. Settings are
+stored privately in `book-status.json` under the configured data directory and
+survive restarts and remapping of the same book key. Preview does not save status.

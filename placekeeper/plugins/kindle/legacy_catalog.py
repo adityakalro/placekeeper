@@ -3,6 +3,7 @@ from collections import Counter
 from datetime import datetime
 import json
 from pathlib import Path
+from hashlib import sha256
 import subprocess
 import sys
 
@@ -23,7 +24,7 @@ def discover(root, connected):
     result = subprocess.run([sys.executable, '-m', 'placekeeper.plugins.kindle.onboarding',
         '--root', str(root/'onboarding'), '--amazon-auth', str(root/'amazon-kindle-download-device.json'),
         '--readest-auth', str(root/'readest-device.json'), '--kfxlib-parent', str(root/'vendor/python'), *options],
-        capture_output=True, timeout=900, cwd=ROOT)
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=900, cwd=ROOT)
     if result.returncode:
         raise ReadFailure('Could not refresh Kindle and Readest book matches.')
     report = json.loads((root/'onboarding/last-run.json').read_text())
@@ -70,7 +71,10 @@ def books(root):
     for item in json.loads(registry.read_text())['profiles']:
         path = Path(item['path'])
         try:
-            profile, mapper, _ = load_profile(path, expected_sha256=item['sha256'])
+            raw = path.read_bytes()
+            if sha256(raw).hexdigest() != item['sha256']:
+                raise ValueError('Map fingerprint changed')
+            profile = json.loads(raw)
             document = profile['document']
             epub = Path(profile['files']['epub']['path'])
             if not epub.is_absolute():
@@ -81,8 +85,8 @@ def books(root):
             edition = ":".join(profile['files'][name]['sha256'] for name in names)
             yield Book('kindle:' + document, title, edition,
                        {'kindle': document, 'kindle_kind': kind, 'crosspoint': profile['crosspoint_document']},
-                       epub, mapper,
-                       lambda doc=document: legacy_state(root/'manual-sync'/doc))
+                       epub, initial_state=lambda doc=document: legacy_state(root/'manual-sync'/doc),
+                       load_mapper=lambda p=path, sha=item['sha256']: load_profile(p, expected_sha256=sha)[1])
         except (ValueError, OSError, KeyError):
             # The job reports this book and continues with other validated maps.
             yield ReadFailure('Could not validate a Kindle book map.')

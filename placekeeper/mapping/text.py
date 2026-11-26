@@ -56,9 +56,18 @@ class TextIndex:
                 raise ValueError('Mixed coordinate domains')
             coordinates.string=string
             chars = []
+            append = coordinates.values.append
             for char, offset in normalized(text):
                 chars.append(char)
-                coordinates.values.append(offset if string else coordinate(offset))
+                try:
+                    append(offset if string else coordinate(offset))
+                except OverflowError:
+                    value = offset if string else coordinate(offset)
+                    if value < 0 or coordinates.values.typecode != 'I':
+                        raise
+                    coordinates.values = array('Q', coordinates.values)
+                    append = coordinates.values.append
+                    append(value)
             chunks.append(''.join(chars))
             if string and len(coordinates)>start:
                 coordinates.starts.append(start)
@@ -87,7 +96,7 @@ class Coordinates(Sequence):
     a node lookup and bounded binary search, rather than a full-book scan.
     """
     def __init__(self):
-        self.values=array('Q')
+        self.values=array('I')
         self.starts=[]
         self.prefixes=[]
         self.nodes={}

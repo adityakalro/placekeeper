@@ -286,7 +286,7 @@ class PluginEngineTests(unittest.TestCase):
         chapters.to_audio.return_value = (1_080_000, 'Chapter One')
         from placekeeper.mapping.text import TextIndex
         coordinates = TextIndex.make([('a'*100, lambda offset: f'/body/p[1]/text()[1].{offset}')]).coordinates
-        reader = LibbyReader(Mock(), {}, Mock(), '', {}, chapters, coordinates, {'timestamp': 1000})
+        reader = LibbyReader(Mock(), {}, Mock(), '', {'duration': 2_000_000}, chapters, coordinates, {'timestamp': 1000})
         with patch('placekeeper.plugins.libby.reader.elapsed', return_value=0):
             current = reader.read({})
         self.assertEqual(current.anchor, 0)

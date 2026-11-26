@@ -123,7 +123,7 @@ class Onboarder:
         try:
             result=subprocess.run([sys.executable,'-m','placekeeper.plugins.kindle.extract_kfx',str(book),
                 str(directory/'map'),'--kfxlib-parent',str(self.kfxlib)],
-                capture_output=True,timeout=120,cwd=ROOT)
+                stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=120,cwd=ROOT)
         except subprocess.TimeoutExpired:
             raise ValueError('KFX extraction timed out') from None
         if result.returncode:
@@ -145,6 +145,7 @@ class Onboarder:
         content,locations=self.extract(doc,directory)
         kindle_text = kfx_index(content)
         accepted=[];checks=[]
+        accepted_index = None
         for candidate in possible:
             epub=self.root/'epubs'/(candidate['id']+'.epub')
             if not epub.exists():
@@ -153,7 +154,12 @@ class Onboarder:
             evidence=evaluate_indexes(epub_text, kindle_text)
             checks.append({'readest_id':candidate['id'],'evidence':evidence})
             if evidence['accepted']:
-                accepted.append((candidate,epub,evidence,epub_text))
+                accepted_index = epub_text if not accepted else None
+                accepted.append((candidate,epub,evidence))
+            # Ambiguous matches never produce a map. Retain only the sole
+            # accepted index, or the single candidate used by chapter fallback.
+            if len(possible) > 1:
+                epub_text = None
         private_json(directory/'match-evidence.json',checks)
         if (not accepted and len(possible) == 1
                 and checks[0]['evidence']['epub_to_kfx']['adequate']
@@ -197,7 +203,8 @@ class Onboarder:
             return {'status':'needs_review' if accepted else 'edition_mismatch',
                     'candidate_count':len(possible),'accepted_count':len(accepted),
                     'catalog_signature':catalog_signature}
-        candidate,epub,evidence,epub_text=accepted[0]
+        candidate,epub,evidence=accepted[0]
+        epub_text = accepted_index
         filename=candidate['title']+'.epub'
         if any(c in filename for c in '<>:"/\\|?*') or any(ord(c)<32 for c in filename) or filename in ('.epub','..epub'):
             return {'status':'needs_review','reason':'unsupported_x4_filename','catalog_signature':catalog_signature}
