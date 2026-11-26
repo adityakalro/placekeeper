@@ -1,13 +1,13 @@
 """CrossPoint plugin registration and account setup."""
 from placekeeper.plugins.contracts import Plugin
+from placekeeper.plugins.lazy import deferred
 from placekeeper.storage import private_json
-from .client import SERVER, authenticate
-from .reader import open_reader, reader_session
 
 FILE = 'crosspoint-auth.json'
 
 
 def setup(root, pending, action, data):
+    from .client import SERVER, authenticate
     username = str(data.get('username', '')).strip()
     password = str(data.get('password', ''))
     if not username or not password:
@@ -23,4 +23,5 @@ PLUGIN = Plugin('crosspoint', 'CrossPoint', (FILE,),
     actions=({'id': 'start', 'label': 'Connect CrossPoint',
               'fields': [{'name': 'username', 'label': 'Sync username'},
                          {'name': 'password', 'label': 'Sync password', 'type': 'password'}]},),
-    setup=setup, reader=open_reader, reader_session=reader_session)
+    setup=setup, reader=deferred(__package__+'.reader', 'open_reader'),
+    reader_session=deferred(__package__+'.reader', 'reader_session'))

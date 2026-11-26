@@ -54,3 +54,29 @@ The large EPUB's normalized text and coordinate fingerprint was identical before
 and after compaction. Tests also cover 64-bit promotion, shared-index identity,
 deferred fingerprint failures, cleanup after reader failures, worker failures,
 and timeout termination of nested processes.
+
+## Lightweight web initialization
+
+Plugin descriptors defer service client, authentication, reader, and catalog
+imports until the corresponding action is used. Rendering Sync or Setup and
+checking connections do not import these implementations. New plugins can use
+`placekeeper.plugins.lazy.deferred` to expose callbacks without eager imports.
+
+In fresh DietPi processes, initializing the web app and reading the same real
+status snapshot used **40.1 MiB RSS before and 22.5 MiB after**. PSS fell from
+**30.5 MiB to 15.3 MiB**, and initialization elapsed time fell from **1.91 s to
+0.49 s**. These measure server initialization, not browser JavaScript heap use.
+Setup actions can still import their required client libraries when invoked.
+
+The Sync page polls every 30 seconds while idle and every 2.5 seconds during a
+job. Hidden tabs stop polling and refresh when visible again. Refresh requests
+do not overlap; actions queue a fresh status check when necessary. Unchanged
+book controls, sync results, and discovery lists retain their existing DOM nodes.
+Idle polling therefore drops from 24 to 2 requests per minute per visible tab.
+
+The lightweight-import regression runs in a fresh Python process. The optional
+browser-logic tests use Node's built-in test runner with no additional packages:
+
+```sh
+node --test tests/test_web_polling.js
+```

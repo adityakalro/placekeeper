@@ -1,6 +1,6 @@
 # Adding a service
 
-Placekeeper loads trusted Python packages from `placekeeper/plugins/` at startup. Add a directory such as `placekeeper/plugins/kobo/` with an `__init__.py` and a `plugin.py` that exports a `PLUGIN` descriptor. Restart Placekeeper to load it. Use a unique, stable plugin ID. The registry, Sync now job, and Setup page pick up the descriptor automatically.
+Placekeeper loads trusted Python packages from `placekeeper/plugins/` at startup. Add a directory such as `placekeeper/plugins/kobo/` with an `__init__.py` and a `plugin.py` that exports a `PLUGIN` descriptor. Restart Placekeeper to load it. Use a unique, stable plugin ID. Keep the descriptor lightweight: use `deferred(__package__+'.reader', 'reader_session')` from `placekeeper.plugins.lazy` for implementation callbacks, and import setup clients inside the setup function. This lets the web page list services without importing their authentication or mapping libraries. The registry, Sync now job, and Setup page pick up the descriptor automatically.
 
 The [plugin contracts](../placekeeper/plugins/contracts.py) describe the interfaces. A plugin can provide setup, book discovery, a verified catalog, progress sync, or a combination. For a new reader, implement its service calls and position conversion in that plugin. For a new catalog, provide verified editions. The planner and executor do not need a new branch.
 

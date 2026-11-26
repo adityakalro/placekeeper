@@ -10,8 +10,6 @@ import secrets
 import threading
 from time import monotonic
 
-import httpx
-
 from placekeeper.sync.worker import run_worker
 from placekeeper.sync import book_status
 from placekeeper.web.setup import Connections
@@ -244,6 +242,7 @@ def handler_for(jobs,hosts,networks):
                 except ValueError as e:self.send(400,{'error':str(e)});return
                 self.send(200,{'connected':True})
             elif self.path=='/api/setup':
+                import httpx
                 try:result=jobs.setup_action(data.get('service'),data.get('action'),data)
                 except (ValueError,ReadFailure) as e:self.send(400,{'error':str(e)});return
                 except (httpx.HTTPError,OSError,KeyError,TypeError):self.send(502,{'error':'Could not complete setup. Check the service and try again.'});return

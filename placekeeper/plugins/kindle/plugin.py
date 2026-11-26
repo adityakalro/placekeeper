@@ -4,15 +4,14 @@ import time
 from urllib.parse import parse_qs, urlsplit
 
 from placekeeper.plugins.contracts import Plugin
+from placekeeper.plugins.lazy import deferred
 from placekeeper.storage import private_json
-from . import registration as kindle
-from .reader import open_reader, reader_session
-from .legacy_catalog import books, discover, invalidate
 
 FILES = ('amazon-device.json', 'amazon-kindle-download-device.json')
 
 
 def start(root, pending, data):
+    from . import registration as kindle
     if any((root / file).exists() for file in FILES):
         raise ValueError('Kindle setup is incomplete. Disconnect it before reconnecting.')
     if pending.exists() and json.loads(pending.read_text()).get('phase') == 'registering':
@@ -25,6 +24,7 @@ def start(root, pending, data):
 
 
 def finish(root, pending, data):
+    from . import registration as kindle
     saved = json.loads(pending.read_text())
     if saved['expires'] < time.time() or saved['phase'] != 'sign_in':
         raise ValueError('This sign-in expired or was already submitted. Start a new connection.')
@@ -58,4 +58,8 @@ PLUGIN = Plugin('kindle', 'Kindle', FILES,
               'consent': 'Allow Placekeeper to register a Kindle device and save its access.'},
              {'id': 'finish', 'label': 'Complete connection', 'after': 'start',
               'fields': [{'name': 'completion_url', 'label': 'Paste the Amazon completion-page address', 'type': 'url'}]}),
-    setup=setup, reader=open_reader, reader_session=reader_session, books=books, discover=discover, disconnect=invalidate, catalog_requires=('readest',))
+    setup=setup, reader=deferred(__package__+'.reader', 'open_reader'),
+    reader_session=deferred(__package__+'.reader', 'reader_session'),
+    books=deferred(__package__+'.legacy_catalog', 'books'),
+    discover=deferred(__package__+'.legacy_catalog', 'discover'),
+    disconnect=deferred(__package__+'.legacy_catalog', 'invalidate'), catalog_requires=('readest',))

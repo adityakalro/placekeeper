@@ -36,10 +36,17 @@
 <script nonce="NONCE">
 const csrf='CSRF';
 const $=id=>document.getElementById(id);
+const rendered=new Map();
+function changed(section,value){
+  const signature=JSON.stringify(value);
+  if(rendered.get(section)===signature)return false;
+  rendered.set(section,signature);return true;
+}
 async function call(path,body){const r=await fetch(path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json','X-Placekeeper':csrf}:{},body:body?JSON.stringify(body):undefined,cache:'no-store'});const d=await r.json();if(!r.ok)throw Error(d.error||'Connection failed');return d;}
 function renderBooks(s){
   const list=$('bookControls');
   if(list.contains(document.activeElement))return;
+  if(!changed('books',[s.books||[],Boolean(s.running)]))return;
   list.replaceChildren();
   const books=s.books||[];
   $('booksEmpty').hidden=books.length>0;
@@ -70,6 +77,7 @@ function renderBooks(s){
 }
 function render(s){
   renderBooks(s);
+  if(changed('controls',[s.connected,s.running,s.can_discover,s.running_job,s.phase,s.schedule_enabled,s.discovery_enabled])){
   $('setupNotice').hidden=s.connected;
   $('sync').disabled=!s.connected||s.running;
   $('discover').disabled=!s.can_discover||s.running;
@@ -79,8 +87,10 @@ function render(s){
   $('schedule').textContent=s.schedule_enabled
     ?(s.connected?'Automatic progress sync is on and runs every 30 minutes.':'Automatic progress sync is on and will run every 30 minutes once setup is complete.')
     :'Automatic progress sync is off.';
+  $('discoverySchedule').textContent=s.discovery_enabled?'Automatic discovery runs every 6 hours.':'Automatic discovery is off.';
+  }
   const last=s.last;
-  if(last){
+  if(last&&changed('last',[last,s.services])){
     $('resultTitle').textContent=last.status==='complete'?'Sync complete':last.status==='needs_attention'?'Some books need attention':'Sync did not finish';
     const books=last.books||[];
     const message=last.message||(last.books?.length===0?'No mapped books to sync. Use Find new books to look for matches.':'');
@@ -123,9 +133,8 @@ function render(s){
     }
     $('time').textContent=last.finished_at?'Finished '+new Date(last.finished_at).toLocaleString():'';
   }
-  $('discoverySchedule').textContent=s.discovery_enabled?'Automatic discovery runs every 6 hours.':'Automatic discovery is off.';
   const discovery=s.last_discovery||(last?.discovery?last:null);
-  if(discovery){
+  if(discovery&&changed('discovery',discovery)){
     const counts=discovery.discovery||{};
     const matches=counts.matches;
     const summary=discovery.message||(matches
@@ -150,14 +159,31 @@ function render(s){
     }
   }
 }
-async function refresh(){try{render(await call('/api/status'))}catch(e){$('phase').textContent='Could not reach the Pi. Check your home Wi-Fi or WireGuard connection.'}}
+let pollTimer=null,pendingRefresh=null,refreshAgain=false,pollDelay=30000;
+function refresh(){
+  clearTimeout(pollTimer);
+  if(document.hidden)return Promise.resolve();
+  if(pendingRefresh){refreshAgain=true;return pendingRefresh;}
+  pendingRefresh=(async()=>{
+    try{const status=await call('/api/status');render(status);pollDelay=status.running?2500:30000;}
+    catch(e){rendered.delete('controls');$('phase').textContent='Could not reach the Pi. Check your home Wi-Fi or WireGuard connection.';}
+    finally{
+      pendingRefresh=null;
+      const delay=refreshAgain?0:pollDelay;refreshAgain=false;
+      if(!document.hidden)pollTimer=setTimeout(refresh,delay);
+    }
+  })();
+  return pendingRefresh;
+}
 function bindJob(id,path){
   $(id).addEventListener('click',async()=>{
+    rendered.delete('controls');
     $('sync').disabled=$('discover').disabled=true;
-    try{await call(path,{});await refresh()}catch(e){await refresh();$('phase').textContent=e.message;}
+    try{await call(path,{});await refresh()}catch(e){await refresh();$('phase').textContent=e.message;rendered.delete('controls');}
   });
 }
 bindJob('sync','/api/sync');
 bindJob('discover','/api/discover');
-refresh();setInterval(refresh,2500);
+document.addEventListener('visibilitychange',()=>{clearTimeout(pollTimer);if(!document.hidden)refresh();});
+refresh();
 </script></html>
