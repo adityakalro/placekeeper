@@ -25,6 +25,16 @@ The installer creates a virtual environment in the checkout and stores configura
 
 Edit `~/.config/placekeeper/web-config.json` as your regular user to change the web port or allowed networks. Restart Placekeeper after editing it. Existing checkouts with a `.private` directory or symlink continue to use it. To choose a different data directory, set `PLACEKEEPER_DATA_DIR` before both installation and startup.
 
+## Upgrading an existing installation
+
+Use the [upgrade guide](docs/upgrading.md) instead of pulling new code into a running
+installation. `bash upgrade.sh` backs up private data and the old environment,
+updates dependencies, checks startup, and rolls back on failure. Add `--service`
+for systemd or `--termux-service` for a supervised Termux installation. The guide
+includes a bootstrap command for older commits without this script.
+Existing accounts, maps, progress, schedules and email duplicate protection are
+preserved. Readest remains optional; Send to Kindle email is opt-in.
+
 ## 2. Start the private web page
 
 ```sh
@@ -94,7 +104,7 @@ An interrupted write may need a check on the destination. Run `.venv/bin/python 
 
 The page runs this step on demand. A separate `python -m placekeeper.sync.onboarding --watch` mode is available, but do not enable the old timed service alongside the manual page if you want fully on-demand behavior.
 
-Titles narrow candidate EPUBs; metadata alone never establishes a match. Acceptance requires identical normalized reading text, 120 distributed unique context matches in each direction, and at least 95% of 40 coordinate round trips. Quarantined books are retried when the catalog changes. Title metadata with no plausible candidate waits instead of bulk-downloading unrelated documents.
+Titles narrow candidate EPUBs; metadata alone never establishes a match. Identical normalized reading text is verified in full and mapped by character index, followed by at least 95% of 40 coordinate round trips. Differing text uses distributed context checks and may qualify for the approximate chapter fallback. Quarantined books are retried when the catalog changes. Title metadata with no plausible candidate waits instead of bulk-downloading unrelated documents.
 
 The X4 identity adapter currently assumes the confirmed filename-MD5 mode and the provided download filename (legacy Readest downloads use `Title.epub`). Renaming the X4 file or changing its hash mode requires another identity adapter.
 

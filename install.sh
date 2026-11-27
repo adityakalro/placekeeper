@@ -8,14 +8,18 @@ pip_args=()
 requirements=requirements-onboarding.txt
 if command -v termux-info >/dev/null && command -v pkg >/dev/null; then
     echo 'Installing Placekeeper for Termux.'
-    pkg install -y git python python-pip python-pillow python-lxml python-pycryptodomex
+    if [[ "${PLACEKEEPER_SKIP_SYSTEM_PACKAGES:-0}" != 1 ]]; then
+        pkg install -y git python python-pip python-pillow python-lxml python-pycryptodomex
+    else
+        echo 'Upgrade: keeping existing Termux system packages unchanged.'
+    fi
     # Use Termux’s packaged pip and native Python modules.
     venv_args+=(--system-site-packages --without-pip)
     pip_args+=(--only-binary=Pillow,lxml)
     requirements=requirements.txt
 elif [[ "$(uname -s)" == Linux ]]; then
     echo 'Installing Placekeeper for Linux.'
-    if (( EUID == 0 )) && command -v apt-get >/dev/null; then
+    if [[ "${PLACEKEEPER_SKIP_SYSTEM_PACKAGES:-0}" != 1 ]] && (( EUID == 0 )) && command -v apt-get >/dev/null; then
         if ! dpkg-query -W -f='${Status}\n' git python3 python3-venv 2>/dev/null |
             awk '$0 == "install ok installed" { count++ } END { exit (count != 3) }'; then
             apt-get update

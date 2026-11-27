@@ -68,7 +68,7 @@ class Jobs:
                 'removed_books':[book for book in books if book.get('removed')],
                 'connected':self.connections.ready(services), 'services':self.connections.status(services),
                 'can_discover':self.discovery_ready(services), 'running_job':self.running_job,
-                'running':self.running,'phase':self.phase,'last':self.last,
+                'running':self.running,'busy':self.lock.locked(),'phase':self.phase,'last':self.last,
                 'last_discovery':self.last_discovery,'schedule_enabled':self.schedule_enabled, 'discovery_enabled':self.discovery_enabled}
 
     def discover(self):

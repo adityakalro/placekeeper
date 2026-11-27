@@ -69,6 +69,12 @@ Run `systemctl restart placekeeper-web.service` after changing the file. Use a t
 
 If the page fails to start, check `journalctl -u placekeeper-web.service -n 30 --no-pager`. A **Private network required** or access-denied response usually means the address or client subnet is missing from the configuration.
 
+## Upgrading an existing Placekeeper checkout
+
+Follow the [upgrade guide](upgrading.md) for private backups, dependency updates,
+service restart checks, and rollback. It supports older commits that do not yet
+contain the upgrade runner and preserves this guide’s `/opt` and `/var/lib` layout.
+
 ## Upgrading from Book Sync
 
 Stop the old web service and, if installed, the optional onboarding service

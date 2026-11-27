@@ -59,3 +59,10 @@ chmod +x "$HOME/.termux/boot/start-placekeeper"
 The wake lock keeps the device awake and can increase battery use. Set Termux’s Android battery setting to unrestricted if your phone offers that option. After rebooting and unlocking the phone, open the local Sync page to confirm it came up. Android can still stop background processes, so check that scheduled sync works with the screen off if you rely on it.
 
 To run progress sync every 30 minutes, enable it in Placekeeper’s **Setup** page. Use **Find new books** to discover and map new titles.
+
+## Upgrading
+
+Use `bash upgrade.sh --termux-service placekeeper` from the checkout to stop and
+restart the supervised service around a backed-up upgrade. For older commits
+without that command, follow the [bootstrap instructions](upgrading.md). Existing
+Termux:Boot scripts and supervisor configuration are retained.
